@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "SignStream (MVP)",
+  "version": "0.0.1",
+  "description": "Real-time sign-language-style overlay (MVP).",
+  "permissions": ["tabCapture", "offscreen", "storage", "scripting", "activeTab"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "SignStream",
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

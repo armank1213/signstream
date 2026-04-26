@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "phrases": {
+    "right now": ["NOW"],
+    "go to": ["GO"],
+    "thank you": ["THANK", "YOU"]
+  },
+  "words": {
+    "today": "TODAY",
+    "learn": "LEARN",
+    "gravity": "GRAVITY",
+    "you": "YOU",
+    "go": "GO",
+    "store": "STORE",
+    "now": "NOW",
+    "hello": "HELLO",
+    "name": "NAME",
+    "what": "WHAT",
+    "happen": "HAPPEN",
+    "thank": "THANK"
+  }
+}
