@@ -1,16 +1,18 @@
 const engineUrlEl = document.getElementById('engineUrl');
-const modeEl = document.getElementById('mode');
 const signRenderModeEl = document.getElementById('signRenderMode');
 const bufferMsEl = document.getElementById('bufferMs');
 const overlayPositionEl = document.getElementById('overlayPosition');
-const overlayScaleEl = document.getElementById('overlayScale');
 const simplificationLevelEl = document.getElementById('simplificationLevel');
 const vadEnabledEl = document.getElementById('vadEnabled');
 const fingerspellUnknownEl = document.getElementById('fingerspellUnknown');
+const toggleCaptionsBtn = document.getElementById('toggleCaptions');
+const toggleSignsBtn = document.getElementById('toggleSigns');
+const modeHintEl = document.getElementById('modeHint');
 
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const statusEl = document.getElementById('status');
+const statusPillEl = document.getElementById('statusPill');
 
 const currentSiteEl = document.getElementById('currentSite');
 const addSiteBtn = document.getElementById('addSiteBtn');
@@ -24,7 +26,6 @@ const DEFAULT_SETTINGS = {
   mode: 'sign+captions',
   signRenderMode: 'chips',
   overlayPosition: 'right-middle',
-  overlayScale: 1.15,
   simplificationLevel: 1,
   vadEnabled: true,
   vadThreshold: 0.01,
@@ -67,6 +68,63 @@ function coerceBool(v) {
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
   statusEl.classList.toggle('error', !!isError);
+}
+
+function setStatusPill(text, tone = 'idle') {
+  if (!statusPillEl) return;
+  statusPillEl.textContent = text;
+  statusPillEl.dataset.tone = tone;
+}
+
+function setToggle(btn, enabled) {
+  if (!btn) return;
+  btn.classList.toggle('active', !!enabled);
+  btn.setAttribute('aria-pressed', String(!!enabled));
+}
+
+function modeFromToggles(captionsOn, signsOn) {
+  if (captionsOn && signsOn) return 'sign+captions';
+  if (signsOn) return 'sign-only';
+  return 'captions-only';
+}
+
+function applyModeToUI(mode) {
+  const captionsOn = mode !== 'sign-only';
+  const signsOn = mode !== 'captions-only';
+  setToggle(toggleCaptionsBtn, captionsOn);
+  setToggle(toggleSignsBtn, signsOn);
+  if (modeHintEl) {
+    modeHintEl.textContent = captionsOn && signsOn
+      ? 'Showing captions + signs.'
+      : (signsOn ? 'Showing signs only.' : 'Showing captions only.');
+  }
+}
+
+function collectSettings() {
+  const captionsOn = toggleCaptionsBtn?.classList.contains('active');
+  const signsOn = toggleSignsBtn?.classList.contains('active');
+  const mode = modeFromToggles(!!captionsOn, !!signsOn);
+
+  return {
+    engineUrl: engineUrlEl.value.trim() || DEFAULT_SETTINGS.engineUrl,
+    mode,
+    signRenderMode: signRenderModeEl.value,
+    bufferMs: coerceNumber(bufferMsEl.value, DEFAULT_SETTINGS.bufferMs),
+    overlayPosition: overlayPositionEl.value,
+    simplificationLevel: coerceNumber(simplificationLevelEl.value, DEFAULT_SETTINGS.simplificationLevel),
+    vadEnabled: coerceBool(vadEnabledEl.value),
+    fingerspellUnknown: coerceBool(fingerspellUnknownEl.value),
+  };
+}
+
+async function persistSettings(partial) {
+  await storageSet(partial);
+}
+
+async function cleanupObsoleteSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.remove(['overlayScale'], () => resolve());
+  });
 }
 
 function runtimeSendMessage(message) {
@@ -213,36 +271,68 @@ async function refresh() {
   const settings = { ...DEFAULT_SETTINGS, ...stored };
 
   engineUrlEl.value = settings.engineUrl || state.engineUrl || DEFAULT_SETTINGS.engineUrl;
-  modeEl.value = settings.mode;
+  applyModeToUI(settings.mode);
   signRenderModeEl.value = settings.signRenderMode || 'chips';
   bufferMsEl.value = String(settings.bufferMs);
   overlayPositionEl.value = settings.overlayPosition;
-  overlayScaleEl.value = String(settings.overlayScale);
   simplificationLevelEl.value = String(settings.simplificationLevel);
   vadEnabledEl.value = String(settings.vadEnabled);
   fingerspellUnknownEl.value = String(settings.fingerspellUnknown);
 
-  if (state.lastError) setStatus(`Error: ${state.lastError}`, true);
-  else if (state.capturing) setStatus('Capturing + streaming…');
-  else setStatus('Idle');
+  if (state.lastError) {
+    setStatus(`Error: ${state.lastError}`, true);
+    setStatusPill('Error', 'error');
+  } else if (state.capturing) {
+    setStatus('Capturing + streaming…');
+    setStatusPill('Live');
+  } else {
+    setStatus('Idle');
+    setStatusPill('Idle', 'idle');
+  }
+
+  startBtn.disabled = !!state.capturing;
+  stopBtn.disabled = !state.capturing;
 
   await refreshSiteAccess();
 }
 
+function handleToggleChange(target) {
+  const captionsOn = toggleCaptionsBtn.classList.contains('active');
+  const signsOn = toggleSignsBtn.classList.contains('active');
+  let nextCaptions = captionsOn;
+  let nextSigns = signsOn;
+
+  if (target === 'captions') nextCaptions = !captionsOn;
+  if (target === 'signs') nextSigns = !signsOn;
+
+  if (!nextCaptions && !nextSigns) nextCaptions = true;
+
+  const mode = modeFromToggles(nextCaptions, nextSigns);
+  applyModeToUI(mode);
+  void persistSettings({ mode });
+}
+
+toggleCaptionsBtn?.addEventListener('click', () => handleToggleChange('captions'));
+toggleSignsBtn?.addEventListener('click', () => handleToggleChange('signs'));
+
+engineUrlEl.addEventListener('change', () => persistSettings({ engineUrl: engineUrlEl.value.trim() || DEFAULT_SETTINGS.engineUrl }));
+signRenderModeEl.addEventListener('change', () => persistSettings({ signRenderMode: signRenderModeEl.value }));
+overlayPositionEl.addEventListener('change', () => persistSettings({ overlayPosition: overlayPositionEl.value }));
+simplificationLevelEl.addEventListener('change', () => persistSettings({
+  simplificationLevel: coerceNumber(simplificationLevelEl.value, DEFAULT_SETTINGS.simplificationLevel),
+}));
+bufferMsEl.addEventListener('change', () => persistSettings({
+  bufferMs: coerceNumber(bufferMsEl.value, DEFAULT_SETTINGS.bufferMs),
+}));
+vadEnabledEl.addEventListener('change', () => persistSettings({ vadEnabled: coerceBool(vadEnabledEl.value) }));
+fingerspellUnknownEl.addEventListener('change', () => persistSettings({
+  fingerspellUnknown: coerceBool(fingerspellUnknownEl.value),
+}));
+
 startBtn.addEventListener('click', async () => {
   setStatus('Starting…');
 
-  const nextSettings = {
-    engineUrl: engineUrlEl.value.trim() || DEFAULT_SETTINGS.engineUrl,
-    mode: modeEl.value,
-    signRenderMode: signRenderModeEl.value,
-    bufferMs: coerceNumber(bufferMsEl.value, DEFAULT_SETTINGS.bufferMs),
-    overlayPosition: overlayPositionEl.value,
-    overlayScale: coerceNumber(overlayScaleEl.value, DEFAULT_SETTINGS.overlayScale),
-    simplificationLevel: coerceNumber(simplificationLevelEl.value, DEFAULT_SETTINGS.simplificationLevel),
-    vadEnabled: coerceBool(vadEnabledEl.value),
-    fingerspellUnknown: coerceBool(fingerspellUnknownEl.value),
-  };
+  const nextSettings = collectSettings();
 
   await storageSet(nextSettings);
 
@@ -264,4 +354,5 @@ stopBtn.addEventListener('click', async () => {
   await refresh();
 });
 
+void cleanupObsoleteSettings();
 refresh();

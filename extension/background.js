@@ -18,7 +18,6 @@ const DEFAULT_SETTINGS = {
   mode: 'sign+captions', // sign-only | captions-only | sign+captions
   signRenderMode: 'chips', // chips | gestures
   overlayPosition: 'right-middle', // right-middle | bottom-right | bottom-left
-  overlayScale: 1.15,
   simplificationLevel: 1,
   vadEnabled: true,
   vadThreshold: 0.01,
@@ -50,6 +49,12 @@ function storageSet(items) {
 async function getSettings() {
   const items = await storageGet(Object.keys(DEFAULT_SETTINGS));
   return { ...DEFAULT_SETTINGS, ...items };
+}
+
+function cleanupObsoleteSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.remove(['overlayScale'], () => resolve());
+  });
 }
 
 function normalizeHostname(input) {
@@ -357,10 +362,12 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  void cleanupObsoleteSettings();
   void registerDynamicContentScripts();
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  void cleanupObsoleteSettings();
   void registerDynamicContentScripts();
 });
 

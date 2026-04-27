@@ -9,9 +9,11 @@
     mode: 'sign+captions',
     signRenderMode: 'chips', // chips | gestures
     overlayPosition: 'right-middle',
-    overlayScale: 1.15,
+    overlayCollapsed: false,
     captionConfThreshold: 0.5,
   };
+
+  const OVERLAY_MAX_WIDTH = 440;
 
   let settings = { ...DEFAULT_SETTINGS };
   let pending = { timeoutId: null, tokens: [], conf: 0.0, displayAt: 0 };
@@ -62,8 +64,7 @@
 
     const pos = settings.overlayPosition;
     const viewportWidth = window.innerWidth;
-    const scale = Number(settings.overlayScale || 1) || 1;
-    const effectiveWidth = Math.min(480 * scale, viewportWidth - 32);
+    const effectiveWidth = Math.min(OVERLAY_MAX_WIDTH, viewportWidth - 32);
 
     let panelOrigin = 'center right';
     let useLeft = false;
@@ -100,9 +101,40 @@
     if (panel) panel.style.transformOrigin = panelOrigin;
   }
 
+  function ensureOverlayStyles() {
+    if (document.getElementById('signstream-overlay-style')) return;
+    const style = document.createElement('style');
+    style.id = 'signstream-overlay-style';
+    style.textContent = `
+#signstream-overlay-root { pointer-events: none; }
+#signstream-overlay-panel { pointer-events: auto; transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
+#signstream-overlay-panel:hover { box-shadow: 0 24px 50px rgba(0,0,0,0.35); border-color: rgba(255,255,255,0.35); }
+.ss-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ss-header-left { display: flex; align-items: center; gap: 8px; }
+.ss-logo { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(56,189,248,0.15); border: 1px solid rgba(56,189,248,0.4); }
+.ss-title { font-size: 12px; font-weight: 600; opacity: 0.9; }
+.ss-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(34,197,94,0.45); background: rgba(34,197,94,0.15); color: #bbf7d0; }
+.ss-pill.error { border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.2); color: #fecaca; }
+.ss-pill.idle { border-color: rgba(148,163,184,0.4); background: rgba(148,163,184,0.15); color: #e2e8f0; }
+.ss-collapse { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #e5e7eb; border-radius: 8px; cursor: pointer; padding: 2px 6px; display: flex; align-items: center; justify-content: center; transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease; }
+.ss-collapse:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.4); }
+.ss-collapse-icon { display: block; transition: transform 0.2s ease; }
+.ss-panel.collapsed .ss-collapse-icon { transform: rotate(-90deg); }
+.ss-body { margin-top: 10px; transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.2s ease; max-height: 1000px; opacity: 1; }
+.ss-panel.collapsed .ss-body { max-height: 0; opacity: 0; margin-top: 0; pointer-events: none; }
+.ss-toggle-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.ss-toggle { padding: 4px 10px; font-size: 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #e5e7eb; cursor: pointer; transition: background 0.2s ease, border-color 0.2s ease; }
+.ss-toggle:hover { background: rgba(255,255,255,0.14); }
+.ss-toggle.active { background: rgba(56,189,248,0.25); border-color: rgba(56,189,248,0.6); color: #e0f2fe; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function ensureOverlay() {
     let root = document.getElementById('signstream-overlay-root');
     if (root) return root;
+
+    ensureOverlayStyles();
 
     root = document.createElement('div');
     root.id = 'signstream-overlay-root';
@@ -110,20 +142,20 @@
     root.style.zIndex = '2147483647';
     root.style.pointerEvents = 'none';
     root.style.overflow = 'visible';
-    const scale = Number(settings.overlayScale || 1) || 1;
     root.style.width = 'auto';
-    root.style.maxWidth = `min(480px, calc((100vw - 32px) / ${scale}))`;
+    root.style.maxWidth = `min(${OVERLAY_MAX_WIDTH}px, calc(100vw - 32px))`;
     root.style.maxHeight = '80vh';
     root.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
     root.style.contains = 'layout style paint';
 
     const panel = document.createElement('div');
     panel.id = 'signstream-overlay-panel';
-    panel.style.background = 'rgba(0,0,0,0.80)';
+    panel.className = 'ss-panel';
+    panel.style.background = 'rgba(7,11,20,0.92)';
     panel.style.color = 'white';
-    panel.style.padding = '14px 16px';
+    panel.style.padding = '12px 14px';
     panel.style.borderRadius = '16px';
-    panel.style.backdropFilter = 'blur(10px)';
+    panel.style.backdropFilter = 'blur(12px)';
     panel.style.border = '1px solid rgba(255,255,255,0.20)';
     panel.style.visibility = 'visible';
     panel.style.opacity = '1';
@@ -132,16 +164,77 @@
     panel.style.maxWidth = '100%';
     panel.style.boxSizing = 'border-box';
     panel.style.boxShadow = '0 20px 40px rgba(0,0,0,0.25)';
-    panel.style.transform = `scale(${scale})`;
-    panel.style.transformOrigin = 'center right';
     panel.style.wordWrap = 'break-word';
     panel.style.overflowWrap = 'break-word';
 
+    const header = document.createElement('div');
+    header.className = 'ss-header';
+
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'ss-header-left';
+
+    const logo = document.createElement('div');
+    logo.className = 'ss-logo';
+    logo.innerHTML = `
+      <svg viewBox="0 0 32 32" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="13" stroke="#38BDF8" stroke-width="2" />
+        <path d="M7.5 18.5c3-3.6 6-3.6 9 0s6 3.6 9 0" stroke="#22C55E" stroke-width="2" stroke-linecap="round" />
+        <circle cx="16" cy="11" r="2" fill="#E2E8F0" />
+      </svg>
+    `;
+
     const title = document.createElement('div');
+    title.className = 'ss-title';
     title.textContent = 'SignStream';
-    title.style.fontSize = '12px';
-    title.style.opacity = '0.85';
-    title.style.marginBottom = '8px';
+
+    headerLeft.appendChild(logo);
+    headerLeft.appendChild(title);
+
+    const headerRight = document.createElement('div');
+    headerRight.style.display = 'flex';
+    headerRight.style.alignItems = 'center';
+    headerRight.style.gap = '6px';
+
+    const statusPill = document.createElement('span');
+    statusPill.id = 'signstream-status-pill';
+    statusPill.className = 'ss-pill idle';
+    statusPill.textContent = 'Ready';
+
+    const collapseBtn = document.createElement('button');
+    collapseBtn.id = 'signstream-collapse-btn';
+    collapseBtn.className = 'ss-collapse';
+    collapseBtn.type = 'button';
+    collapseBtn.setAttribute('aria-expanded', 'true');
+    collapseBtn.setAttribute('aria-label', 'Collapse panel');
+    collapseBtn.innerHTML = '<span class="ss-collapse-icon">▾</span>';
+
+    headerRight.appendChild(statusPill);
+    headerRight.appendChild(collapseBtn);
+
+    header.appendChild(headerLeft);
+    header.appendChild(headerRight);
+
+    const body = document.createElement('div');
+    body.id = 'signstream-overlay-body';
+    body.className = 'ss-body';
+
+    const toggleRow = document.createElement('div');
+    toggleRow.className = 'ss-toggle-row';
+
+    const captionsToggle = document.createElement('button');
+    captionsToggle.id = 'signstream-toggle-captions';
+    captionsToggle.className = 'ss-toggle';
+    captionsToggle.type = 'button';
+    captionsToggle.textContent = 'Captions';
+
+    const signsToggle = document.createElement('button');
+    signsToggle.id = 'signstream-toggle-signs';
+    signsToggle.className = 'ss-toggle';
+    signsToggle.type = 'button';
+    signsToggle.textContent = 'Signs';
+
+    toggleRow.appendChild(captionsToggle);
+    toggleRow.appendChild(signsToggle);
 
     const caption = document.createElement('div');
     caption.id = 'signstream-caption';
@@ -207,14 +300,29 @@
     status.style.opacity = '0.8';
     status.textContent = 'Listening…';
 
-    panel.appendChild(title);
-    panel.appendChild(caption);
-    panel.appendChild(gestureWrap);
-    panel.appendChild(chips);
-    panel.appendChild(status);
+    body.appendChild(toggleRow);
+    body.appendChild(caption);
+    body.appendChild(gestureWrap);
+    body.appendChild(chips);
+    body.appendChild(status);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
     root.appendChild(panel);
     applyOverlayPosition(root);
     document.documentElement.appendChild(root);
+
+    collapseBtn.addEventListener('click', () => {
+      setOverlayCollapsed(!settings.overlayCollapsed, true);
+    });
+
+    captionsToggle.addEventListener('click', () => {
+      toggleOverlayMode('captions');
+    });
+
+    signsToggle.addEventListener('click', () => {
+      toggleOverlayMode('signs');
+    });
 
     return root;
   }
@@ -454,6 +562,71 @@
     if (status) status.textContent = text;
   }
 
+  function setStatusPill(text, tone = 'active') {
+    const root = ensureOverlay();
+    const pill = root.querySelector('#signstream-status-pill');
+    if (!pill) return;
+    pill.textContent = text;
+    pill.classList.toggle('error', tone === 'error');
+    pill.classList.toggle('idle', tone === 'idle');
+    if (tone !== 'error' && tone !== 'idle') {
+      pill.classList.remove('error', 'idle');
+    }
+  }
+
+  function setToggleButton(btn, enabled) {
+    if (!btn) return;
+    btn.classList.toggle('active', !!enabled);
+    btn.setAttribute('aria-pressed', String(!!enabled));
+  }
+
+  function applyModeToOverlayControls(mode) {
+    const root = ensureOverlay();
+    const captionsBtn = root.querySelector('#signstream-toggle-captions');
+    const signsBtn = root.querySelector('#signstream-toggle-signs');
+    const captionsOn = mode !== 'sign-only';
+    const signsOn = mode !== 'captions-only';
+    setToggleButton(captionsBtn, captionsOn);
+    setToggleButton(signsBtn, signsOn);
+  }
+
+  function toggleOverlayMode(target) {
+    const root = ensureOverlay();
+    const captionsBtn = root.querySelector('#signstream-toggle-captions');
+    const signsBtn = root.querySelector('#signstream-toggle-signs');
+    const captionsOn = captionsBtn?.classList.contains('active');
+    const signsOn = signsBtn?.classList.contains('active');
+    let nextCaptions = !!captionsOn;
+    let nextSigns = !!signsOn;
+
+    if (target === 'captions') nextCaptions = !nextCaptions;
+    if (target === 'signs') nextSigns = !nextSigns;
+
+    if (!nextCaptions && !nextSigns) nextCaptions = true;
+
+    const nextMode = nextCaptions && nextSigns
+      ? 'sign+captions'
+      : (nextSigns ? 'sign-only' : 'captions-only');
+
+    settings.mode = nextMode;
+    applyModeToOverlayControls(nextMode);
+    void storageSet({ mode: nextMode });
+    render(pending.tokens || [], pending.conf || 0);
+  }
+
+  function setOverlayCollapsed(collapsed, persist) {
+    settings.overlayCollapsed = !!collapsed;
+    const root = ensureOverlay();
+    const panel = root.querySelector('#signstream-overlay-panel');
+    const collapseBtn = root.querySelector('#signstream-collapse-btn');
+    if (panel) panel.classList.toggle('collapsed', settings.overlayCollapsed);
+    if (collapseBtn) {
+      collapseBtn.setAttribute('aria-expanded', String(!settings.overlayCollapsed));
+      collapseBtn.setAttribute('aria-label', settings.overlayCollapsed ? 'Expand panel' : 'Collapse panel');
+    }
+    if (persist) void storageSet({ overlayCollapsed: settings.overlayCollapsed });
+  }
+
   function storageGet(keys) {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get(keys, (items) => {
@@ -464,15 +637,27 @@
     });
   }
 
+  function storageSet(items) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set(items, () => {
+        const err = chrome.runtime.lastError;
+        if (err) return reject(new Error(err.message));
+        resolve();
+      });
+    });
+  }
+
   async function loadSettings() {
     const stored = await storageGet(Object.keys(DEFAULT_SETTINGS));
     settings = { ...DEFAULT_SETTINGS, ...stored };
 
     const root = document.getElementById('signstream-overlay-root');
-    if (root) applyOverlayPosition(root);
-
-    const panel = document.getElementById('signstream-overlay-panel');
-    if (panel) panel.style.transform = `scale(${settings.overlayScale || 1})`;
+    if (root) {
+      applyOverlayPosition(root);
+      applyModeToOverlayControls(settings.mode);
+      setOverlayCollapsed(!!settings.overlayCollapsed, false);
+      render(pending.tokens || [], pending.conf || 0);
+    }
   }
 
   // Always register listeners even if we weren't on a watchable page when the script first ran.
