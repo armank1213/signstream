@@ -55,16 +55,4 @@ Example: token `HELP` → `extension/assets/signs/help.webm`
 
 If a clip is missing, it falls back to text chips.
 
-### 3D Avatar (VRM) (experimental)
-
-If you choose **Sign rendering → 3D avatar (VRM)**, the extension will load:
-
-- `extension/assets/avatar/model.vrm`
-
-This repo does not ship a VRM model by default (licensing varies). Add your own VRM file at that path.
-
-Current MVP behavior: the avatar performs simple procedural gestures for a few tokens (HELLO/YES/NO/THANK/etc). For real ASL signing you’ll eventually need a curated animation library per token.
-
-If the avatar fails to load, the overlay status line will show an `Avatar error: ...` message (usually missing `model.vrm` or an unsupported VRM/glTF feature).
-
-Note: I can’t generate or bundle copyrighted sign-language datasets for you. Use self-made or properly-licensed assets.
+Note: bundle only self-made or properly-licensed sign-language assets.

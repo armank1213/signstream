@@ -11,7 +11,7 @@ let settings = {
   simplificationLevel: 1,
   vadEnabled: true,
   vadThreshold: 0.01,
-  useWorklet: false,
+  useWorklet: true,
   captionConfThreshold: 0.5,
   fingerspellUnknown: true,
 };
@@ -258,19 +258,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === 'OFFSCREEN_START') {
         await start(msg);
         sendResponse({ ok: true });
-        return;
-      }
-      if (msg?.type === 'OFFSCREEN_STOP') {
+      } else if (msg?.type === 'OFFSCREEN_STOP') {
         await stop();
         sendResponse({ ok: true });
-        return;
       }
     } catch (e) {
-      await stop();
-      chrome.runtime.sendMessage({ type: 'OFFSCREEN_ERROR', error: String(e?.message || e) });
+      try {
+        await stop();
+      } catch {
+        // ignore
+      }
+      try {
+        chrome.runtime.sendMessage({ type: 'OFFSCREEN_ERROR', error: String(e?.message || e) });
+      } catch {
+        // ignore
+      }
       sendResponse({ ok: false, error: String(e?.message || e) });
     }
-  })();
+  })().catch((err) => {
+    console.error('[SignStream] Offscreen message handler error:', err);
+    try {
+      sendResponse({ ok: false, error: String(err?.message || err) });
+    } catch {
+      // channel already closed
+    }
+  });
 
   return true;
 });

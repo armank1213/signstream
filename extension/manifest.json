@@ -5,6 +5,7 @@
   "description": "Real-time sign-language-style overlay (MVP).",
   "permissions": ["tabCapture", "offscreen", "storage", "scripting", "activeTab"],
   "host_permissions": ["https://www.youtube.com/*"],
+  "optional_host_permissions": ["*://*/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -32,11 +33,9 @@
     {
       "resources": [
         "assets/signs/*",
-        "assets/avatar/*",
-        "lib/*",
-        "renderer/*"
+        "contentScript.js"
       ],
-      "matches": ["https://www.youtube.com/*"]
+      "matches": ["<all_urls>"]
     }
   ]
 }

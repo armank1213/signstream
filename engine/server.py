@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
@@ -397,8 +399,8 @@ async def handler(ws):
 
 
 async def main():
-    async with websockets.serve(handler, "127.0.0.1", 8765, max_size=8 * 1024 * 1024):
-        print("SignStream engine listening on ws://127.0.0.1:8765")
+    async with websockets.serve(handler, "127.0.0.1", 4000, max_size=8 * 1024 * 1024):
+        print("SignStream engine listening on ws://127.0.0.1:4000")
         await asyncio.Future()
 
 

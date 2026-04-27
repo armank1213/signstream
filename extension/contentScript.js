@@ -1,9 +1,13 @@
 (function () {
-  const isYouTubeWatch = () => location.hostname === 'www.youtube.com' && location.pathname === '/watch';
+  const isYouTube = () => location.hostname === 'www.youtube.com';
+  const isYouTubeWatch = () => isYouTube() && location.pathname === '/watch';
+  // On YouTube, only show on /watch pages (other YT pages don't have audio worth captioning).
+  // On every other allowed site, just always run.
+  const isEnabled = () => (isYouTube() ? isYouTubeWatch() : true);
 
   const DEFAULT_SETTINGS = {
     mode: 'sign+captions',
-    signRenderMode: 'chips', // chips | gestures | avatar
+    signRenderMode: 'chips', // chips | gestures
     overlayPosition: 'right-middle',
     overlayScale: 1.15,
     captionConfThreshold: 0.5,
@@ -19,245 +23,26 @@
     cancelToken: 0,
   };
 
-  // Avatar renderer runs in the content script world (avoids YouTube CSP blocking injected scripts).
-  let avatarState = {
-    loading: null,
-    ready: false,
-    error: null,
-    THREE: null,
-    GLTFLoader: null,
-    scene: null,
-    camera: null,
-    renderer: null,
-    clock: null,
-    avatar: null,
-    bones: {},
-    gesture: { name: null, t0: 0 },
-  };
-
-  function ensureAvatarMount() {
-    const root = ensureOverlay();
-    const wrap = root.querySelector('#signstream-avatar-wrap');
-    if (!wrap) return null;
-
-    let canvas = wrap.querySelector('#signstream-avatar-canvas');
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      canvas.id = 'signstream-avatar-canvas';
-      canvas.style.width = '220px';
-      canvas.style.height = '220px';
-      canvas.style.borderRadius = '16px';
-      canvas.style.border = '1px solid rgba(255,255,255,0.20)';
-      canvas.style.background = 'rgba(255,255,255,0.06)';
-      canvas.style.display = 'block';
-      wrap.appendChild(canvas);
-    }
-
-    let label = wrap.querySelector('#signstream-avatar-label');
-    if (!label) {
-      label = document.createElement('div');
-      label.id = 'signstream-avatar-label';
-      label.style.marginTop = '8px';
-      label.style.fontSize = '13px';
-      label.style.fontWeight = '700';
-      label.style.opacity = '0.9';
-      wrap.appendChild(label);
-    }
-
-    return { wrap, canvas, label };
-  }
-
-  function findFirstByName(root, patterns) {
-    if (!root) return null;
-    const pats = (patterns || []).map((p) => String(p).toLowerCase());
-    let best = null;
-    root.traverse((o) => {
-      if (!o || !o.name) return;
-      const n = String(o.name).toLowerCase();
-      if (pats.some((p) => n.includes(p))) best = o;
-    });
-    return best;
-  }
-
-  function avatarCacheBones(avatarRoot) {
-    const rightHand = findFirstByName(avatarRoot, [
-      'r_hand',
-      'righthand',
-      'j_bip_r_hand',
-      'hand_r',
-      'rhand',
-      'handright',
-      'hand',
-    ]);
-    const leftHand = findFirstByName(avatarRoot, [
-      'l_hand',
-      'lefthand',
-      'j_bip_l_hand',
-      'hand_l',
-      'lhand',
-      'handleft',
-      'hand',
-    ]);
-    const head = findFirstByName(avatarRoot, ['head']);
-
-    avatarState.bones = { rightHand, leftHand, head };
-  }
-
-  function avatarResetRotation(o, s = 0.15) {
-    if (!o || !o.rotation) return;
-    o.rotation.x *= 1 - s;
-    o.rotation.y *= 1 - s;
-    o.rotation.z *= 1 - s;
-  }
-
-  function avatarApplyGesture(name, t) {
-    const { rightHand, leftHand, head } = avatarState.bones || {};
-
-    avatarResetRotation(rightHand);
-    avatarResetRotation(leftHand);
-    avatarResetRotation(head, 0.08);
-
-    const wave = Math.sin(t * Math.PI * 2);
-
-    if (name === 'HELLO') {
-      if (rightHand) rightHand.rotation.z += wave * 0.6;
-    } else if (name === 'YES') {
-      if (head) head.rotation.x += Math.sin(t * Math.PI * 4) * 0.15;
-    } else if (name === 'NO') {
-      if (head) head.rotation.y += Math.sin(t * Math.PI * 4) * 0.25;
-    } else if (name === 'THANK') {
-      if (rightHand) rightHand.rotation.x += -0.6 * Math.sin(t * Math.PI);
-    } else if (name === 'PLEASE') {
-      if (rightHand) rightHand.rotation.y += 0.4 * Math.sin(t * Math.PI * 2);
-    } else if (name === 'HELP') {
-      if (leftHand) leftHand.rotation.y += -0.35 * Math.sin(t * Math.PI);
-      if (rightHand) rightHand.rotation.y += 0.35 * Math.sin(t * Math.PI);
-    } else {
-      if (rightHand) rightHand.rotation.x += 0.25 * Math.sin(t * Math.PI * 2);
-    }
-  }
-
-  function avatarAnimate() {
-    if (!avatarState.renderer || !avatarState.scene || !avatarState.camera) return;
-
-    if (avatarState.avatar) {
-      avatarState.avatar.rotation.y = Math.sin(Date.now() / 2000) * 0.15;
-    }
-
-    if (avatarState.gesture?.name) {
-      const dur = 0.85;
-      const t = Math.min(1, (performance.now() - avatarState.gesture.t0) / (dur * 1000));
-      avatarApplyGesture(avatarState.gesture.name, t);
-      if (t >= 1) avatarState.gesture.name = null;
-    }
-
-    const canvas = avatarState.renderer.domElement;
-    const w = canvas.clientWidth || 220;
-    const h = canvas.clientHeight || 220;
-    avatarState.renderer.setSize(w, h, false);
-    avatarState.camera.aspect = w / h;
-    avatarState.camera.updateProjectionMatrix();
-
-    avatarState.renderer.render(avatarState.scene, avatarState.camera);
-    requestAnimationFrame(avatarAnimate);
-  }
-
-  async function ensureAvatarReady() {
-    if (avatarState.ready) return;
-    if (avatarState.loading) return avatarState.loading;
-
-    avatarState.loading = (async () => {
-      const mount = ensureAvatarMount();
-      if (!mount) throw new Error('Avatar mount missing');
-
-      const { canvas, label } = mount;
-      label.textContent = 'Loading avatar…';
-
-      // Load modules (must be web accessible for some Chrome versions)
-      const threeUrl = chrome.runtime.getURL('lib/three.module.min.js');
-      const loaderUrl = chrome.runtime.getURL('lib/GLTFLoader.mjs');
-
-      const THREE = await import(threeUrl);
-      const loaderMod = await import(loaderUrl);
-
-      const GLTFLoader = loaderMod.GLTFLoader;
-      if (!GLTFLoader) throw new Error('GLTFLoader unavailable');
-
-      avatarState.THREE = THREE;
-      avatarState.GLTFLoader = GLTFLoader;
-
-      avatarState.scene = new THREE.Scene();
-
-      avatarState.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-      avatarState.camera.position.set(0, 1.35, 2.2);
-
-      avatarState.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-      avatarState.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-
-      const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
-      hemi.position.set(0, 2, 0);
-      avatarState.scene.add(hemi);
-
-      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-      dir.position.set(1, 2, 1);
-      avatarState.scene.add(dir);
-
-      const modelUrl = chrome.runtime.getURL('assets/avatar/model.vrm');
-
-      const loader = new GLTFLoader();
-      let gltf;
-      try {
-        gltf = await loader.loadAsync(modelUrl);
-      } catch (e) {
-        throw new Error(`Failed to load model.vrm: ${String(e?.message || e)}`);
-      }
-
-      avatarState.avatar = gltf.scene;
-      avatarState.avatar.position.set(0, 0, 0);
-      avatarState.scene.add(avatarState.avatar);
-      avatarCacheBones(avatarState.avatar);
-
-      label.textContent = 'Avatar ready';
-      avatarState.ready = true;
-      avatarState.error = null;
-
-      requestAnimationFrame(avatarAnimate);
-    })().catch((e) => {
-      avatarState.error = String(e?.message || e);
-      avatarState.ready = false;
-      const mount = ensureAvatarMount();
-      if (mount?.label) mount.label.textContent = 'Avatar load failed';
-      setStatus(`Avatar error: ${avatarState.error}`);
-    }).finally(() => {
-      avatarState.loading = null;
-    });
-
-    return avatarState.loading;
-  }
-
-  function avatarPlayTokens(tokens) {
-    void ensureAvatarReady();
-
-    const mount = ensureAvatarMount();
-    const label = mount?.label;
-
-    const first = (tokens || []).find((x) => x && typeof x === 'string' && !x.startsWith('FS:'));
-    if (!first) return;
-
-    if (label) label.textContent = String(first);
-    avatarState.gesture = { name: String(first).toUpperCase(), t0: performance.now() };
-  }
-
   const gestureAvailabilityCache = new Map();
 
-  function tokenToGestureUrl(token) {
-    if (!token || typeof token !== 'string') return null;
-    // Skip fingerspelling pseudo-tokens.
-    if (token.startsWith('FS:')) return null;
+  function tokenToGestureAssetUrls(token) {
+    if (!token || typeof token !== 'string') return [];
 
-    const safe = token.toLowerCase().replace(/[^a-z0-9_-]+/g, '');
-    if (!safe) return null;
-    return chrome.runtime.getURL(`assets/signs/${safe}.webm`);
+    let normalized = token;
+    if (token.startsWith('FS:')) {
+      normalized = token.slice(3);
+    }
+
+    const safe = normalized.toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+    if (!safe) return [];
+    const base = chrome.runtime.getURL(`assets/signs/${safe}`);
+    return [
+      `${base}.webm`,
+      `${base}.png`,
+      `${base}.webp`,
+      `${base}.jpg`,
+      `${base}.jpeg`,
+    ];
   }
 
   // Try to avoid repeated failed loads, but don't block playback if probing fails.
@@ -275,18 +60,43 @@
     root.style.transform = '';
 
     const pos = settings.overlayPosition;
+    const viewportWidth = window.innerWidth;
+    const scale = Number(settings.overlayScale || 1) || 1;
+    const effectiveWidth = Math.min(480 * scale, viewportWidth - 32);
+
+    let panelOrigin = 'center right';
+    let useLeft = false;
+
     if (pos === 'bottom-right') {
-      root.style.right = '16px';
+      if (16 + effectiveWidth > viewportWidth) {
+        root.style.left = '16px';
+        useLeft = true;
+      } else {
+        root.style.right = '16px';
+      }
       root.style.bottom = '16px';
+      panelOrigin = useLeft ? 'bottom left' : 'bottom right';
     } else if (pos === 'bottom-left') {
       root.style.left = '16px';
       root.style.bottom = '16px';
+      panelOrigin = 'bottom left';
     } else {
-      // right-middle
-      root.style.right = '16px';
-      root.style.top = '50%';
-      root.style.transform = 'translateY(-50%)';
+      // right-middle (default)
+      if (16 + effectiveWidth > viewportWidth) {
+        root.style.left = '16px';
+        root.style.top = '50%';
+        root.style.transform = 'translateY(-50%)';
+        panelOrigin = 'center left';
+      } else {
+        root.style.right = '16px';
+        root.style.top = '50%';
+        root.style.transform = 'translateY(-50%)';
+        panelOrigin = 'center right';
+      }
     }
+
+    const panel = root.querySelector('#signstream-overlay-panel');
+    if (panel) panel.style.transformOrigin = panelOrigin;
   }
 
   function ensureOverlay() {
@@ -298,12 +108,13 @@
     root.style.position = 'fixed';
     root.style.zIndex = '2147483647';
     root.style.pointerEvents = 'none';
-    root.style.maxWidth = '420px';
+    root.style.overflow = 'visible';
+    const scale = Number(settings.overlayScale || 1) || 1;
+    root.style.width = 'auto';
+    root.style.maxWidth = `min(480px, calc((100vw - 32px) / ${scale}))`;
     root.style.maxHeight = '80vh';
-    root.style.overflow = 'hidden';
     root.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif';
-
-    applyOverlayPosition(root);
+    root.style.contains = 'layout style paint';
 
     const panel = document.createElement('div');
     panel.id = 'signstream-overlay-panel';
@@ -313,10 +124,17 @@
     panel.style.borderRadius = '16px';
     panel.style.backdropFilter = 'blur(10px)';
     panel.style.border = '1px solid rgba(255,255,255,0.20)';
+    panel.style.visibility = 'visible';
+    panel.style.opacity = '1';
+    panel.style.width = '100%';
     panel.style.minWidth = '280px';
+    panel.style.maxWidth = '100%';
+    panel.style.boxSizing = 'border-box';
     panel.style.boxShadow = '0 20px 40px rgba(0,0,0,0.25)';
-    panel.style.transformOrigin = 'bottom right';
-    panel.style.transform = `scale(${settings.overlayScale || 1})`;
+    panel.style.transform = `scale(${scale})`;
+    panel.style.transformOrigin = 'center right';
+    panel.style.wordWrap = 'break-word';
+    panel.style.overflowWrap = 'break-word';
 
     const title = document.createElement('div');
     title.textContent = 'SignStream';
@@ -330,10 +148,9 @@
     caption.style.lineHeight = '1.35';
     caption.style.marginBottom = '10px';
     caption.style.opacity = '0.95';
-
-    const avatarWrap = document.createElement('div');
-    avatarWrap.id = 'signstream-avatar-wrap';
-    avatarWrap.style.display = 'none';
+    caption.style.wordWrap = 'break-word';
+    caption.style.overflowWrap = 'break-word';
+    caption.style.hyphens = 'auto';
 
     const gestureWrap = document.createElement('div');
     gestureWrap.id = 'signstream-gesture-wrap';
@@ -354,6 +171,16 @@
     gestureVideo.style.border = '1px solid rgba(255,255,255,0.20)';
     gestureVideo.style.background = 'rgba(255,255,255,0.06)';
 
+    const gestureImage = document.createElement('img');
+    gestureImage.id = 'signstream-gesture-image';
+    gestureImage.style.display = 'none';
+    gestureImage.style.width = '160px';
+    gestureImage.style.height = '160px';
+    gestureImage.style.objectFit = 'contain';
+    gestureImage.style.borderRadius = '16px';
+    gestureImage.style.border = '1px solid rgba(255,255,255,0.20)';
+    gestureImage.style.background = 'rgba(255,255,255,0.06)';
+
     const gestureLabel = document.createElement('div');
     gestureLabel.id = 'signstream-gesture-label';
     gestureLabel.style.fontSize = '13px';
@@ -361,6 +188,7 @@
     gestureLabel.style.fontWeight = '700';
 
     gestureWrap.appendChild(gestureVideo);
+    gestureWrap.appendChild(gestureImage);
     gestureWrap.appendChild(gestureLabel);
 
     const chips = document.createElement('div');
@@ -368,6 +196,8 @@
     chips.style.display = 'flex';
     chips.style.flexWrap = 'wrap';
     chips.style.gap = '8px';
+    chips.style.width = '100%';
+    chips.style.boxSizing = 'border-box';
 
     const status = document.createElement('div');
     status.id = 'signstream-status';
@@ -378,11 +208,11 @@
 
     panel.appendChild(title);
     panel.appendChild(caption);
-    panel.appendChild(avatarWrap);
     panel.appendChild(gestureWrap);
     panel.appendChild(chips);
     panel.appendChild(status);
     root.appendChild(panel);
+    applyOverlayPosition(root);
     document.documentElement.appendChild(root);
 
     return root;
@@ -405,11 +235,8 @@
     for (const t of queue) {
       if (myToken !== gestureState.cancelToken) break;
 
-      const url = tokenToGestureUrl(t);
-      if (!url) continue;
-
-      // If we've already learned this URL is missing, skip it.
-      if (gestureAvailabilityCache.get(url) === false) continue;
+      const urls = tokenToGestureAssetUrls(t);
+      if (!urls.length) continue;
 
       label.textContent = String(t);
 
@@ -420,25 +247,66 @@
           done = true;
           video.onended = null;
           video.onerror = null;
+          image.onload = null;
+          image.onerror = null;
           resolve();
         };
 
-        video.onended = () => {
-          noteGestureResult(url, true);
-          finish();
-        };
-        video.onerror = () => {
-          noteGestureResult(url, false);
-          finish();
+        const nextUrl = () => {
+          if (urls.length === 0) {
+            finish();
+            return;
+          }
+
+          const assetUrl = urls.shift();
+          const isVideo = assetUrl.endsWith('.webm');
+          if (isVideo) {
+            if (gestureAvailabilityCache.get(assetUrl) === false) {
+              nextUrl();
+              return;
+            }
+            video.style.display = 'block';
+            image.style.display = 'none';
+
+            video.onended = () => {
+              noteGestureResult(assetUrl, true);
+              finish();
+            };
+            video.onerror = () => {
+              noteGestureResult(assetUrl, false);
+              nextUrl();
+            };
+
+            // Safety timeout (prevents hanging if onended never fires)
+            const timeoutMs = 900;
+            const timeoutId = setTimeout(() => {
+              clearTimeout(timeoutId);
+              finish();
+            }, timeoutMs);
+
+            video.src = assetUrl;
+            video.currentTime = 0;
+            void video.play().catch(() => {
+              clearTimeout(timeoutId);
+              nextUrl();
+            });
+          } else {
+            video.style.display = 'none';
+            image.style.display = 'block';
+
+            image.onload = () => {
+              const timeoutMs = 900;
+              setTimeout(finish, timeoutMs);
+            };
+            image.onerror = () => {
+              nextUrl();
+            };
+
+            image.src = assetUrl;
+          }
         };
 
-        // Safety timeout (prevents hanging if onended never fires)
-        const timeoutMs = 900;
-        setTimeout(finish, timeoutMs);
-
-        video.src = url;
-        video.currentTime = 0;
-        void video.play().catch(() => finish());
+        nextUrl();
       });
 
       // Small gap between signs
@@ -478,7 +346,6 @@
     const chips = root.querySelector('#signstream-chips');
     const status = root.querySelector('#signstream-status');
     const caption = root.querySelector('#signstream-caption');
-    const avatarWrap = root.querySelector('#signstream-avatar-wrap');
     const gestureWrap = root.querySelector('#signstream-gesture-wrap');
     const mode = settings.mode;
 
@@ -490,18 +357,13 @@
 
     const wantsSigns = mode !== 'captions-only';
     const wantsGestures = wantsSigns && settings.signRenderMode === 'gestures';
-    const wantsAvatar = wantsSigns && settings.signRenderMode === 'avatar';
-
-    if (avatarWrap) {
-      avatarWrap.style.display = wantsAvatar ? 'block' : 'none';
-    }
 
     if (gestureWrap) {
       gestureWrap.style.display = wantsGestures ? 'flex' : 'none';
     }
 
     if (chips) {
-      chips.style.display = wantsSigns && !wantsGestures && !wantsAvatar ? 'flex' : 'none';
+      chips.style.display = wantsSigns && !wantsGestures ? 'flex' : 'none';
       chips.textContent = '';
       (tokens || []).slice(0, 16).forEach((t) => {
         const chip = document.createElement('span');
@@ -528,11 +390,7 @@
     if (status) {
       status.textContent = conf < (settings.captionConfThreshold || 0.5)
         ? 'Low confidence — showing captions'
-        : (settings.signRenderMode === 'gestures'
-          ? 'Live (gestures)'
-          : settings.signRenderMode === 'avatar'
-            ? 'Live (avatar)'
-            : 'Live');
+        : (settings.signRenderMode === 'gestures' ? 'Live (gestures)' : 'Live');
     }
 
     if (wantsGestures) {
@@ -540,10 +398,6 @@
       void playGestureSequence(tokens || []);
     } else {
       stopGestures();
-    }
-
-    if (wantsAvatar) {
-      avatarPlayTokens(tokens || []);
     }
   }
 
@@ -590,12 +444,15 @@
     if (panel) panel.style.transform = `scale(${settings.overlayScale || 1})`;
   }
 
-  // Always register listeners even if we weren't on /watch when the script first ran.
+  // Always register listeners even if we weren't on a watchable page when the script first ran.
   // YouTube is SPA-like; the user may navigate to /watch without a full page reload.
 
-  if (isYouTubeWatch()) {
+  if (isEnabled()) {
     ensureOverlay();
     void loadSettings();
+    console.log(`[SignStream] Overlay initialized on ${location.hostname}`);
+  } else {
+    console.log(`[SignStream] Disabled on ${location.hostname}`);
   }
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
@@ -603,10 +460,14 @@
     void loadSettings();
   });
 
-  // Avatar now runs in content script world; no window message bridge needed.
+  // Reposition overlay on window resize to ensure it stays visible
+  window.addEventListener('resize', () => {
+    const root = document.getElementById('signstream-overlay-root');
+    if (root) applyOverlayPosition(root);
+  });
 
   chrome.runtime.onMessage.addListener((msg) => {
-    if (!isYouTubeWatch()) return;
+    if (!isEnabled()) return;
 
     if (msg?.type === 'ENGINE_TOKENS') {
       const tokens = msg.tokens || [];
@@ -628,11 +489,14 @@
     }
   });
 
-  const obs = new MutationObserver(() => {
-    if (isYouTubeWatch()) {
-      ensureOverlay();
-      void loadSettings();
-    }
-  });
-  obs.observe(document.documentElement, { childList: true, subtree: true });
+  // Only YouTube needs SPA-style re-injection on URL changes; non-SPA sites init once.
+  if (isYouTube()) {
+    const obs = new MutationObserver(() => {
+      if (isEnabled()) {
+        ensureOverlay();
+        void loadSettings();
+      }
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  }
 })();

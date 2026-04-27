@@ -5,86 +5,110 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SignStream</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; width: 280px; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; min-width: 320px; max-width: 10000px; max-height: 600px; overflow-y: auto; }
       label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; }
       input { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 8px; border: 1px solid #ddd; }
       select { width: 100%; box-sizing: border-box; }
       .row { display: flex; gap: 8px; margin-top: 10px; }
-      button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; }
+      button { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 13px; }
       button.primary { background: #111827; color: white; border-color: #111827; }
+      button:disabled { opacity: 0.55; cursor: not-allowed; }
       .status { margin-top: 10px; font-size: 12px; opacity: 0.85; }
       .error { color: #b91c1c; }
+      .section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #eee; }
+      .section h3 { margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7; font-weight: 600; }
+      .site-current { font-size: 13px; padding: 8px 10px; background: #f3f4f6; border-radius: 8px; word-break: break-all; }
+      .site-current.allowed { background: #ecfdf5; color: #065f46; }
+      .site-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 110px; overflow-y: auto; }
+      .site-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; font-size: 12px; background: #fafafa; border-radius: 6px; }
+      .site-row .host { word-break: break-all; }
+      .site-row .badge { font-size: 10px; opacity: 0.6; margin-left: 6px; }
+      .site-row .remove { flex: 0 0 auto; padding: 2px 8px; border-radius: 6px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; font-size: 12px; line-height: 1; }
+      .site-row .remove:disabled { opacity: 0.4; cursor: not-allowed; }
     </style>
   </head>
   <body>
-    <label for="engineUrl">Engine WebSocket URL</label>
-    <input id="engineUrl" placeholder="ws://127.0.0.1:8765" />
+    <div class="section" style="margin-top: 0; border-top: none; padding-top: 0;">
+      <h3>Site access</h3>
+      <div id="currentSite" class="site-current">Checking active tab…</div>
+      <div class="row">
+        <button id="addSiteBtn">Add this site</button>
+      </div>
+      <div id="siteList" class="site-list"></div>
+    </div>
 
-    <div style="height: 10px"></div>
+    <div class="section">
+      <h3>Engine</h3>
+      <label for="engineUrl">Engine WebSocket URL</label>
+      <input id="engineUrl" placeholder="ws://127.0.0.1:4000" />
+    </div>
 
-    <label for="mode">Display mode</label>
-    <select id="mode" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="sign+captions">Signs + captions (recommended)</option>
-      <option value="sign-only">Signs only</option>
-      <option value="captions-only">Captions only</option>
-    </select>
+    <div class="section">
+      <h3>Display</h3>
 
-    <div style="height: 10px"></div>
+      <label for="mode">Display mode</label>
+      <select id="mode" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="sign+captions">Signs + captions (recommended)</option>
+        <option value="sign-only">Signs only</option>
+        <option value="captions-only">Captions only</option>
+      </select>
 
-    <label for="signRenderMode">Sign rendering</label>
-    <select id="signRenderMode" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="chips">Text chips (fast)</option>
-      <option value="gestures">Gesture clips (requires assets)</option>
-      <option value="avatar">3D avatar (VRM) (experimental)</option>
-    </select>
+      <div style="height: 10px"></div>
 
-    <div style="height: 10px"></div>
+      <label for="signRenderMode">Sign rendering</label>
+      <select id="signRenderMode" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="chips">Text chips (fast)</option>
+        <option value="gestures">Gesture clips (requires assets)</option>
+      </select>
 
-    <label for="bufferMs">Sync buffer (ms)</label>
-    <input id="bufferMs" type="number" min="0" max="5000" step="100" placeholder="1500" />
+      <div style="height: 10px"></div>
 
-    <div style="height: 10px"></div>
+      <label for="bufferMs">Sync buffer (ms)</label>
+      <input id="bufferMs" type="number" min="0" max="5000" step="100" placeholder="1500" />
 
-    <label for="overlayPosition">Overlay position</label>
-    <select id="overlayPosition" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="right-middle">Right middle</option>
-      <option value="bottom-right">Bottom right</option>
-      <option value="bottom-left">Bottom left</option>
-    </select>
+      <div style="height: 10px"></div>
 
-    <div style="height: 10px"></div>
+      <label for="overlayPosition">Overlay position</label>
+      <select id="overlayPosition" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="right-middle">Right middle</option>
+        <option value="bottom-right">Bottom right</option>
+        <option value="bottom-left">Bottom left</option>
+      </select>
 
-    <label for="overlayScale">Overlay size</label>
-    <select id="overlayScale" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="1">Normal</option>
-      <option value="1.15">Large</option>
-      <option value="1.3">Extra large</option>
-    </select>
+      <div style="height: 10px"></div>
 
-    <div style="height: 10px"></div>
+      <label for="overlayScale">Overlay size</label>
+      <select id="overlayScale" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="1">Normal</option>
+        <option value="1.15">Large</option>
+        <option value="1.3">Extra large</option>
+      </select>
 
-    <label for="simplificationLevel">Simplification</label>
-    <select id="simplificationLevel" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="0">Off (raw words)</option>
-      <option value="1">Medium (remove fillers)</option>
-      <option value="2">High (remove fillers + extra)</option>
-    </select>
+      <div style="height: 10px"></div>
 
-    <div style="height: 10px"></div>
+      <label for="simplificationLevel">Simplification</label>
+      <select id="simplificationLevel" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="0">Off (raw words)</option>
+        <option value="1">Medium (remove fillers)</option>
+        <option value="2">High (remove fillers + extra)</option>
+      </select>
 
-    <label for="vadEnabled">Performance (VAD)</label>
-    <select id="vadEnabled" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="true">On (recommended)</option>
-      <option value="false">Off</option>
-    </select>
+      <div style="height: 10px"></div>
 
-    <div style="height: 10px"></div>
+      <label for="vadEnabled">Performance (VAD)</label>
+      <select id="vadEnabled" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="true">On (recommended)</option>
+        <option value="false">Off</option>
+      </select>
 
-    <label for="fingerspellUnknown">Unknown words</label>
-    <select id="fingerspellUnknown" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
-      <option value="true">Fingerspell (ASL-style)</option>
-      <option value="false">Show as text</option>
-    </select>
+      <div style="height: 10px"></div>
+
+      <label for="fingerspellUnknown">Unknown words</label>
+      <select id="fingerspellUnknown" style="width:100%; padding:8px; border-radius:8px; border:1px solid #ddd;">
+        <option value="true">Fingerspell (ASL-style)</option>
+        <option value="false">Show as text</option>
+      </select>
+    </div>
 
     <div class="row">
       <button id="startBtn" class="primary">Start</button>
