@@ -255,7 +255,7 @@ addSiteBtn.addEventListener('click', async () => {
     return;
   }
 
-  setStatus(`${host} added. Reload the tab to enable the overlay.`);
+  setStatus(`${host} added. Click Start to begin.`);
   await refreshSiteAccess();
 });
 

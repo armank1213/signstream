@@ -1,4 +1,9 @@
 (function () {
+  // Guard against double-injection (auto-inject after Add Site + reloaded page
+  // re-injecting via the dynamic registration would otherwise duplicate listeners).
+  if (window.__signstreamInjected) return;
+  window.__signstreamInjected = true;
+
   const isYouTube = () => location.hostname === 'www.youtube.com';
   const isYouTubeWatch = () => isYouTube() && location.pathname === '/watch';
   // On YouTube, only show on /watch pages (other YT pages don't have audio worth captioning).
@@ -18,6 +23,7 @@
   let settings = { ...DEFAULT_SETTINGS };
   let pending = { timeoutId: null, tokens: [], conf: 0.0, displayAt: 0 };
   let lastTranscript = '';
+  let renderingActive = true;
 
   let gestureState = {
     wordQueue: [],
@@ -323,39 +329,30 @@
     const gestureWrap = document.createElement('div');
     gestureWrap.id = 'signstream-gesture-wrap';
     gestureWrap.style.display = 'none';
+    gestureWrap.style.flexDirection = 'column';
     gestureWrap.style.gap = '8px';
-    gestureWrap.style.alignItems = 'center';
-
-    const gestureVideo = document.createElement('video');
-    gestureVideo.id = 'signstream-gesture-video';
-    gestureVideo.muted = true;
-    gestureVideo.playsInline = true;
-    gestureVideo.autoplay = true;
-    gestureVideo.preload = 'auto';
-    gestureVideo.style.width = '160px';
-    gestureVideo.style.height = '160px';
-    gestureVideo.style.objectFit = 'contain';
-    gestureVideo.style.borderRadius = '16px';
-    gestureVideo.style.border = '1px solid rgba(255,255,255,0.20)';
-    gestureVideo.style.background = 'rgba(255,255,255,0.06)';
-
-    const gestureLetters = document.createElement('div');
-    gestureLetters.id = 'signstream-gesture-letters';
-    gestureLetters.style.display = 'none';
-    gestureLetters.style.gap = '8px';
-    gestureLetters.style.flexWrap = 'wrap';
-    gestureLetters.style.alignItems = 'center';
-    gestureLetters.style.justifyContent = 'center';
+    gestureWrap.style.alignItems = 'stretch';
+    gestureWrap.style.width = '100%';
+    gestureWrap.style.marginBottom = '10px';
 
     const gestureLabel = document.createElement('div');
     gestureLabel.id = 'signstream-gesture-label';
     gestureLabel.style.fontSize = '13px';
     gestureLabel.style.opacity = '0.9';
     gestureLabel.style.fontWeight = '700';
+    gestureLabel.style.textAlign = 'center';
 
-    gestureWrap.appendChild(gestureVideo);
-    gestureWrap.appendChild(gestureLetters);
+    const gestureLetters = document.createElement('div');
+    gestureLetters.id = 'signstream-gesture-letters';
+    gestureLetters.style.display = 'none';
+    gestureLetters.style.flexWrap = 'wrap';
+    gestureLetters.style.gap = '8px';
+    gestureLetters.style.alignItems = 'flex-start';
+    gestureLetters.style.justifyContent = 'center';
+    gestureLetters.style.width = '100%';
+
     gestureWrap.appendChild(gestureLabel);
+    gestureWrap.appendChild(gestureLetters);
 
     const chips = document.createElement('div');
     chips.id = 'signstream-chips';
@@ -395,6 +392,11 @@
     signsToggle.addEventListener('click', () => {
       toggleOverlayMode('signs');
     });
+
+    // Apply persisted in-memory settings now — loadSettings() may have already
+    // run before the overlay existed.
+    applyModeToOverlayControls(settings.mode);
+    if (settings.overlayCollapsed) setOverlayCollapsed(true, false);
 
     return root;
   }
@@ -499,17 +501,8 @@
 
     const root = document.getElementById('signstream-overlay-root');
     const wrap = root?.querySelector?.('#signstream-gesture-wrap');
-    const video = root?.querySelector?.('#signstream-gesture-video');
     const label = root?.querySelector?.('#signstream-gesture-label');
     const gestureLetters = root?.querySelector?.('#signstream-gesture-letters');
-
-    try {
-      if (video) {
-        video.pause();
-        video.removeAttribute('src');
-        video.load?.();
-      }
-    } catch {}
 
     if (gestureLetters) gestureLetters.innerHTML = '';
     if (label) label.textContent = '';
@@ -517,6 +510,9 @@
   }
 
   function stopRendering() {
+    renderingActive = false;
+    lastTranscript = '';
+
     if (pending.timeoutId) {
       clearTimeout(pending.timeoutId);
       pending.timeoutId = null;
@@ -526,16 +522,9 @@
     pending.displayAt = 0;
     stopGestureRefresh();
 
+    // Remove the overlay entirely so the user only sees it while capture is active.
     const root = document.getElementById('signstream-overlay-root');
-    if (!root) return;
-
-    const chips = root.querySelector('#signstream-chips');
-    const caption = root.querySelector('#signstream-caption');
-    const status = root.querySelector('#signstream-status');
-
-    if (chips) chips.textContent = '';
-    if (caption) caption.textContent = '';
-    if (status) status.textContent = 'Stopped';
+    if (root && root.parentNode) root.parentNode.removeChild(root);
   }
 
   function render(tokens, conf) {
@@ -727,9 +716,10 @@
   // YouTube is SPA-like; the user may navigate to /watch without a full page reload.
 
   if (isEnabled()) {
-    ensureOverlay();
+    // Load settings into memory but don't show the overlay yet — it appears
+    // only once the user starts capture from the popup.
     void loadSettings();
-    console.log(`[SignStream] Overlay initialized on ${location.hostname}`);
+    console.log(`[SignStream] Ready on ${location.hostname} (overlay hidden until capture starts)`);
   } else {
     console.log(`[SignStream] Disabled on ${location.hostname}`);
   }
@@ -753,15 +743,23 @@
     }
 
     if (msg?.type === 'ENGINE_TRANSCRIPT') {
+      if (!renderingActive) return;
       lastTranscript = msg.text || '';
       render(pending.tokens || [], pending.conf || 0);
       enqueueWordsFromTranscript();
     }
 
     if (msg?.type === 'ENGINE_STATUS') {
-      setStatus(msg.status || '');
-      if (msg.status === 'Stopped' || msg.status === 'Idle' || msg.status === 'Error') {
+      const status = msg.status || '';
+      if (status === 'Stopped' || status === 'Idle' || status === 'Error') {
         stopRendering();
+      } else if (status === 'Engine connected' || status === 'Capturing audio…') {
+        renderingActive = true;
+        setStatus(status);
+      } else if (renderingActive) {
+        // Only update status text if the overlay should already exist —
+        // late status messages after a stop must not resurrect it.
+        setStatus(status);
       }
     }
 
@@ -770,14 +768,4 @@
     }
   });
 
-  // Only YouTube needs SPA-style re-injection on URL changes; non-SPA sites init once.
-  if (isYouTube()) {
-    const obs = new MutationObserver(() => {
-      if (isEnabled()) {
-        ensureOverlay();
-        void loadSettings();
-      }
-    });
-    obs.observe(document.documentElement, { childList: true, subtree: true });
-  }
 })();

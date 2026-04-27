@@ -151,6 +151,37 @@ async function registerDynamicContentScripts() {
   }
 }
 
+async function injectContentScriptIntoOpenTabs(hostname) {
+  // Static registration only takes effect on next page load. Inject into
+  // already-open tabs of this host so the user doesn't have to reload.
+  let tabs;
+  try {
+    tabs = await new Promise((resolve, reject) => {
+      chrome.tabs.query({ url: originPatternForHost(hostname) }, (result) => {
+        const err = chrome.runtime.lastError;
+        if (err) return reject(new Error(err.message));
+        resolve(result || []);
+      });
+    });
+  } catch (e) {
+    console.warn('[SignStream] tabs.query failed for', hostname, e);
+    return;
+  }
+
+  for (const tab of tabs) {
+    if (!tab?.id) continue;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['contentScript.js'],
+      });
+    } catch (e) {
+      // Already-loaded scripts will throw "already injected" or similar — fine.
+      console.warn('[SignStream] executeScript skipped for tab', tab.id, e?.message);
+    }
+  }
+}
+
 async function addAllowedDomain(hostname) {
   const host = normalizeHostname(hostname);
   if (!host) throw new Error('Invalid hostname');
@@ -163,6 +194,7 @@ async function addAllowedDomain(hostname) {
   if (!stored.includes(host)) stored.push(host);
   await setStoredDomains(stored);
   await registerDynamicContentScripts();
+  await injectContentScriptIntoOpenTabs(host);
 }
 
 async function removeAllowedDomain(hostname) {
@@ -461,10 +493,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       if (msg?.type === 'ENGINE_TOKENS' || msg?.type === 'ENGINE_TRANSCRIPT') {
-        if (!state.tabId) {
-          console.warn('[SignStream] ENGINE message received but no active tabId');
-          return;
-        }
+        // Drop late engine messages after the user pressed stop —
+        // otherwise they re-trigger gesture rendering on the content script.
+        if (!state.capturing || !state.tabId) return;
         try {
           await tabsSendMessage(state.tabId, msg);
         } catch (e) {
