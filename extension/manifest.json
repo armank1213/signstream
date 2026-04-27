@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SignStream",
-  "version": "0.0.2",
-  "description": "Real-time sign-language translation extension.",
+  "version": "0.0.4",
+  "description": "Real-time text to sign language translation for video content.",
   "permissions": ["tabCapture", "offscreen", "storage", "scripting", "activeTab"],
   "host_permissions": ["https://www.youtube.com/*"],
   "optional_host_permissions": ["*://*/*"],
