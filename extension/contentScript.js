@@ -30,6 +30,7 @@
     processedWords: [],
     displayTimeoutId: null,
     isActive: false,
+    isPaused: false,
   };
 
   const gestureAvailabilityCache = new Map();
@@ -445,7 +446,7 @@
 
   function processWordQueue() {
     gestureState.displayTimeoutId = null;
-    if (!gestureState.isActive || gestureState.wordQueue.length === 0) return;
+    if (!gestureState.isActive || gestureState.isPaused || gestureState.wordQueue.length === 0) return;
 
     const word = gestureState.wordQueue.shift();
     if (!renderQueuedWord(word)) {
@@ -454,6 +455,23 @@
     }
 
     gestureState.displayTimeoutId = setTimeout(processWordQueue, wordDisplayDurationMs(word));
+  }
+
+  function pauseGestureInterpreter() {
+    if (gestureState.isPaused) return;
+    gestureState.isPaused = true;
+    if (gestureState.displayTimeoutId) {
+      clearTimeout(gestureState.displayTimeoutId);
+      gestureState.displayTimeoutId = null;
+    }
+  }
+
+  function resumeGestureInterpreter() {
+    if (!gestureState.isPaused) return;
+    gestureState.isPaused = false;
+    if (gestureState.isActive && gestureState.wordQueue.length > 0 && !gestureState.displayTimeoutId) {
+      processWordQueue();
+    }
   }
 
   function enqueueWordsFromTranscript() {
@@ -485,6 +503,7 @@
     if (gestureState.isActive) return;
 
     gestureState.isActive = true;
+    gestureState.isPaused = false;
     gestureState.processedWords = [];
     gestureState.wordQueue = [];
     enqueueWordsFromTranscript();
@@ -498,6 +517,7 @@
     gestureState.wordQueue = [];
     gestureState.processedWords = [];
     gestureState.isActive = false;
+    gestureState.isPaused = false;
 
     const root = document.getElementById('signstream-overlay-root');
     const wrap = root?.querySelector?.('#signstream-gesture-wrap');
@@ -507,6 +527,76 @@
     if (gestureLetters) gestureLetters.innerHTML = '';
     if (label) label.textContent = '';
     if (wrap) wrap.style.display = 'none';
+  }
+
+  let videoSyncState = {
+    video: null,
+    handlers: null,
+    observer: null,
+  };
+
+  function findPrimaryVideoElement() {
+    const v = document.querySelector('video');
+    return v instanceof HTMLVideoElement ? v : null;
+  }
+
+  function detachVideoListeners() {
+    const v = videoSyncState.video;
+    const h = videoSyncState.handlers;
+    if (v && h) {
+      try { v.removeEventListener('pause', h.onPause, true); } catch {}
+      try { v.removeEventListener('play', h.onPlay, true); } catch {}
+      try { v.removeEventListener('playing', h.onPlaying, true); } catch {}
+      try { v.removeEventListener('ended', h.onEnded, true); } catch {}
+    }
+    videoSyncState.video = null;
+    videoSyncState.handlers = null;
+  }
+
+  function attachVideoListeners(videoEl) {
+    if (!videoEl || videoSyncState.video === videoEl) return;
+    detachVideoListeners();
+
+    const handlers = {
+      onPause: () => pauseGestureInterpreter(),
+      onPlay: () => resumeGestureInterpreter(),
+      onPlaying: () => resumeGestureInterpreter(),
+      onEnded: () => pauseGestureInterpreter(),
+    };
+
+    videoSyncState.video = videoEl;
+    videoSyncState.handlers = handlers;
+
+    videoEl.addEventListener('pause', handlers.onPause, true);
+    videoEl.addEventListener('play', handlers.onPlay, true);
+    videoEl.addEventListener('playing', handlers.onPlaying, true);
+    videoEl.addEventListener('ended', handlers.onEnded, true);
+
+    // Sync initial state.
+    if (videoEl.paused) pauseGestureInterpreter();
+    else resumeGestureInterpreter();
+  }
+
+  function startVideoPauseSync() {
+    if (videoSyncState.observer) return;
+
+    const tryAttach = () => {
+      if (!isEnabled()) return;
+      attachVideoListeners(findPrimaryVideoElement());
+    };
+
+    tryAttach();
+
+    // YouTube replaces the <video> element during SPA nav / quality changes.
+    const mo = new MutationObserver(() => tryAttach());
+    mo.observe(document.documentElement, { subtree: true, childList: true });
+    videoSyncState.observer = mo;
+
+    // If the tab is backgrounded, freeze the interpreter so it doesn't drift.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) pauseGestureInterpreter();
+      else tryAttach();
+    });
   }
 
   function stopRendering() {
@@ -719,6 +809,7 @@
     // Load settings into memory but don't show the overlay yet — it appears
     // only once the user starts capture from the popup.
     void loadSettings();
+    startVideoPauseSync();
     console.log(`[SignStream] Ready on ${location.hostname} (overlay hidden until capture starts)`);
   } else {
     console.log(`[SignStream] Disabled on ${location.hostname}`);
