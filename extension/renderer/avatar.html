@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SignStream Avatar</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+      #root {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        color: white;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        pointer-events: none;
+      }
+      #label {
+        margin-top: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        opacity: 0.9;
+        text-align: center;
+      }
+      canvas {
+        width: 220px;
+        height: 220px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.20);
+        background: rgba(255,255,255,0.06);
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./avatarFrame.mjs"></script>
+  </body>
+</html>
