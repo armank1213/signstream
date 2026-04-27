@@ -8,6 +8,36 @@ let state = {
   lastError: null,
 };
 
+const DEFAULT_SETTINGS = {
+  engineUrl: DEFAULT_ENGINE_URL,
+  bufferMs: 1500,
+  mode: 'sign+captions', // sign-only | captions-only | sign+captions
+  signRenderMode: 'chips', // chips | gestures
+  overlayPosition: 'right-middle', // right-middle | bottom-right | bottom-left
+  overlayScale: 1.15,
+  simplificationLevel: 1,
+  vadEnabled: true,
+  vadThreshold: 0.01,
+  useWorklet: false,
+  captionConfThreshold: 0.5,
+  fingerspellUnknown: true,
+};
+
+function storageGet(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (items) => {
+      const err = chrome.runtime.lastError;
+      if (err) return reject(new Error(err.message));
+      resolve(items || {});
+    });
+  });
+}
+
+async function getSettings() {
+  const items = await storageGet(Object.keys(DEFAULT_SETTINGS));
+  return { ...DEFAULT_SETTINGS, ...items };
+}
+
 function runtimeSendMessage(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (resp) => {
@@ -101,7 +131,9 @@ function getMediaStreamIdForTab(tabId) {
 
 async function startCapture(engineUrl) {
   state.lastError = null;
-  state.engineUrl = engineUrl || state.engineUrl || DEFAULT_ENGINE_URL;
+
+  const settings = await getSettings();
+  state.engineUrl = engineUrl || settings.engineUrl || state.engineUrl || DEFAULT_ENGINE_URL;
 
   const tabId = await getActiveTabId();
   if (!tabId) {
@@ -127,6 +159,7 @@ async function startCapture(engineUrl) {
     tabId,
     streamId,
     engineUrl: state.engineUrl,
+    settings,
   });
 }
 
@@ -141,6 +174,12 @@ async function stopCapture() {
   }
   state.tabId = null;
 }
+
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'toggle-capture') return;
+  if (state.capturing) await stopCapture();
+  else await startCapture();
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -162,7 +201,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      if (msg?.type === 'ENGINE_TOKENS') {
+      if (msg?.type === 'ENGINE_TOKENS' || msg?.type === 'ENGINE_TRANSCRIPT') {
         if (!state.tabId) return;
         try {
           await tabsSendMessage(state.tabId, msg);

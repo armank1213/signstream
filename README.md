@@ -1,6 +1,6 @@
 # SignStream (MVP)
 
-Chrome extension + local engine that turns tab audio into a sign-token overlay (mock engine for now).
+Chrome extension + local engine that turns YouTube tab audio into **captions + ASL-ish sign tokens** (rule-based gloss + glossary mapping + optional fingerspelling fallback).
 
 ## Run the local engine (real STT)
 
@@ -41,4 +41,28 @@ python engine/mock_engine.py
 4. Open a YouTube video (`https://www.youtube.com/watch?...`)
 5. Click the SignStream extension icon → **Start**
 
-You should see an overlay in the bottom-right that updates with mock sign tokens.
+You should see an overlay (default: right side) that updates with live transcript + sign tokens.
+
+Tip: In the popup, set **Sign rendering → Gesture clips** to render hand-gesture clips per token.
+
+### Gesture assets (MVP)
+
+The extension looks for gesture clips at:
+
+- `extension/assets/signs/<token>.webm`
+
+Example: token `HELP` → `extension/assets/signs/help.webm`
+
+If a clip is missing, it falls back to text chips.
+
+### 3D Avatar (VRM) (experimental)
+
+If you choose **Sign rendering → 3D avatar (VRM)**, the extension will load:
+
+- `extension/assets/avatar/model.vrm`
+
+This repo does not ship a VRM model by default (licensing varies). Add your own VRM file at that path.
+
+Current MVP behavior: the avatar performs simple procedural gestures for a few tokens (HELLO/YES/NO/THANK/etc). For real ASL signing you’ll eventually need a curated animation library per token.
+
+Note: I can’t generate or bundle copyrighted sign-language datasets for you. Use self-made or properly-licensed assets.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SignStream (MVP)",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Real-time sign-language-style overlay (MVP).",
   "permissions": ["tabCapture", "offscreen", "storage", "scripting", "activeTab"],
   "host_permissions": ["https://www.youtube.com/*"],
@@ -12,11 +12,31 @@
     "default_title": "SignStream",
     "default_popup": "popup/popup.html"
   },
+  "commands": {
+    "toggle-capture": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Toggle SignStream capture"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
       "js": ["contentScript.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/signs/*",
+        "assets/avatar/*",
+        "lib/*",
+        "renderer/*"
+      ],
+      "matches": ["https://www.youtube.com/*"]
     }
   ]
 }

@@ -3,20 +3,43 @@
   "phrases": {
     "right now": ["NOW"],
     "go to": ["GO"],
-    "thank you": ["THANK", "YOU"]
+    "thank you": ["THANK", "YOU"],
+    "i not know": ["ME", "NOT", "KNOW"],
+    "want to": ["WANT"],
+    "need to": ["NEED"]
   },
   "words": {
     "today": "TODAY",
+    "tomorrow": "TOMORROW",
+    "yesterday": "YESTERDAY",
+    "now": "NOW",
+
     "learn": "LEARN",
     "gravity": "GRAVITY",
-    "you": "YOU",
-    "go": "GO",
-    "store": "STORE",
-    "now": "NOW",
+
     "hello": "HELLO",
     "name": "NAME",
+
+    "go": "GO",
+    "store": "STORE",
+    "help": "HELP",
+    "want": "WANT",
+    "need": "NEED",
+    "please": "PLEASE",
+
     "what": "WHAT",
+    "where": "WHERE",
+    "who": "WHO",
+    "when": "WHEN",
+    "why": "WHY",
+    "how": "HOW",
+
     "happen": "HAPPEN",
-    "thank": "THANK"
+    "know": "KNOW",
+
+    "thank": "THANK",
+    "sorry": "SORRY",
+    "yes": "YES",
+    "no": "NO"
   }
 }
