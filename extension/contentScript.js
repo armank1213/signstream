@@ -18,9 +18,10 @@
   let lastTranscript = '';
 
   let gestureState = {
-    playing: false,
-    queue: [],
-    cancelToken: 0,
+    wordQueue: [],
+    processedWords: [],
+    displayTimeoutId: null,
+    isActive: false,
   };
 
   const gestureAvailabilityCache = new Map();
@@ -92,21 +93,31 @@
     });
   }
 
-  function getNextGestureBlock() {
-    if (gestureState.queue.length === 0) return null;
-    const item = gestureState.queue.shift();
-    return Array.isArray(item) ? item : [item];
+  function normalizeWord(word) {
+    if (typeof word !== 'string') return '';
+    return word.toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
-  function queueGestureTokens(tokens) {
-    return (tokens || []).flatMap((t) => {
-      if (typeof t !== 'string') return [t];
-      if (!t.startsWith('FS:')) return [t];
+  function transcriptToWords(text) {
+    if (typeof text !== 'string' || !text.trim()) return [];
+    return text.trim().split(/\s+/).filter(Boolean);
+  }
 
-      const value = t.slice(3).toLowerCase().replace(/[^a-z0-9]+/g, '');
-      if (value.length <= 1) return [t];
-      return [value.split('').map((ch) => `FS:${ch}`)];
-    });
+  function commonPrefixLength(a, b) {
+    const len = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < len && normalizeWord(a[i]) === normalizeWord(b[i])) i++;
+    return i;
+  }
+
+  function wordDisplayDurationMs(word) {
+    const letters = normalizeWord(word);
+    return Math.min(2500, Math.max(800, letters.length * 250));
+  }
+
+  function wordToLetterTokens(word) {
+    if (!word || typeof word !== 'string') return [];
+    return word.toLowerCase().split('').map((ch) => `FS:${ch}`);
   }
 
   // Try to avoid repeated failed loads, but don't block playback if probing fails.
@@ -280,160 +291,109 @@
     return root;
   }
 
-  async function playGestureSequence() {
+  function renderQueuedWord(word) {
     const root = ensureOverlay();
-    const wrap = root.querySelector('#signstream-gesture-wrap');
-    const video = root.querySelector('#signstream-gesture-video');
     const gestureLetters = root.querySelector('#signstream-gesture-letters');
     const label = root.querySelector('#signstream-gesture-label');
+    if (!gestureLetters || !label) return false;
 
-    if (!wrap || !video || !gestureLetters || !label) return;
+    const letters = normalizeWord(word);
+    if (!letters) return false;
 
-    const myToken = ++gestureState.cancelToken;
-    gestureState.playing = true;
+    label.textContent = word;
+    gestureLetters.innerHTML = '';
 
-    wrap.style.display = 'flex';
-    console.log('[SignStream] Playing gesture queue');
+    const letterTokens = wordToLetterTokens(letters);
+    console.log('[SignStream] Fingerspelling word:', word, 'letters:', letterTokens);
 
-    while (gestureState.queue.length > 0 && myToken === gestureState.cancelToken) {
-      const block = getNextGestureBlock();
-      if (!block || block.length === 0) continue;
-
-      const isFsWord = block.length > 1 && block.every((item) => typeof item === 'string' && item.startsWith('FS:'));
-      const tokenLabel = isFsWord
-        ? block.map((item) => item.slice(3)).join('')
-        : String(block[0] && typeof block[0] === 'string' && block[0].startsWith('FS:') ? block[0].slice(3) : block[0]);
-
-      label.textContent = tokenLabel;
-      gestureLetters.innerHTML = '';
-
-      if (isFsWord) {
-        video.style.display = 'none';
-        gestureLetters.style.display = 'flex';
-
-        const loadPromises = block.map((letterToken) => {
-          const imageUrls = tokenToGestureImageUrls(letterToken);
-          const img = document.createElement('img');
-          img.style.width = '80px';
-          img.style.height = '80px';
-          img.style.objectFit = 'contain';
-          img.style.borderRadius = '16px';
-          img.style.border = '1px solid rgba(255,255,255,0.20)';
-          img.style.background = 'rgba(255,255,255,0.06)';
-          gestureLetters.appendChild(img);
-          return loadImageWithFallback(img, imageUrls.slice()).then((loaded) => {
-            if (!loaded) {
-              console.warn('[SignStream] Image failed to load for token:', letterToken);
-            }
-          });
-        });
-
-        await Promise.race([
-          Promise.allSettled(loadPromises),
-          new Promise((resolve) => setTimeout(resolve, 900)),
-        ]);
-        await new Promise((resolve) => setTimeout(resolve, 900));
-      } else {
-        const t = block[0];
-        const urls = tokenToGestureAssetUrls(t);
-        if (!urls.length) continue;
-
-        await new Promise((resolve) => {
-          let done = false;
-          const finish = () => {
-            if (done) return;
-            done = true;
-            video.onended = null;
-            video.onerror = null;
-            gestureLetters.innerHTML = '';
-            resolve();
-          };
-
-          const nextUrl = () => {
-            if (urls.length === 0) {
-              finish();
-              return;
-            }
-
-            const assetUrl = urls.shift();
-            const isVideo = assetUrl.endsWith('.webm');
-            if (isVideo) {
-              if (gestureAvailabilityCache.get(assetUrl) === false) {
-                nextUrl();
-                return;
-              }
-              video.style.display = 'block';
-              gestureLetters.style.display = 'none';
-
-              video.onended = () => {
-                noteGestureResult(assetUrl, true);
-                finish();
-              };
-              video.onerror = () => {
-                noteGestureResult(assetUrl, false);
-                nextUrl();
-              };
-
-              const timeoutMs = 900;
-              const timeoutId = setTimeout(() => {
-                clearTimeout(timeoutId);
-                finish();
-              }, timeoutMs);
-
-              video.src = assetUrl;
-              video.currentTime = 0;
-              void video.play().catch((err) => {
-                console.warn('[SignStream] Video failed to play:', assetUrl, err);
-                clearTimeout(timeoutId);
-                nextUrl();
-              });
-            } else {
-              video.style.display = 'none';
-              gestureLetters.style.display = 'flex';
-
-              const imageUrls = tokenToGestureImageUrls(t);
-              const img = document.createElement('img');
-              img.style.width = '80px';
-              img.style.height = '80px';
-              img.style.objectFit = 'contain';
-              img.style.borderRadius = '16px';
-              img.style.border = '1px solid rgba(255,255,255,0.20)';
-              img.style.background = 'rgba(255,255,255,0.06)';
-              gestureLetters.appendChild(img);
-
-              loadImageWithFallback(img, imageUrls.slice()).then((loaded) => {
-                if (!loaded) {
-                  console.warn('[SignStream] Image failed to load for token:', t);
-                }
-                const timeoutMs = 900;
-                setTimeout(finish, timeoutMs);
-              });
-            }
-          };
-
-          nextUrl();
-        });
+    letterTokens.forEach((letterToken) => {
+      const imageUrls = tokenToGestureImageUrls(letterToken);
+      if (imageUrls.length === 0) {
+        console.warn('[SignStream] No gesture URLs for letter:', letterToken);
+        return;
       }
 
-      await new Promise((r) => setTimeout(r, 120));
-    }
+      const img = document.createElement('img');
+      img.style.width = '80px';
+      img.style.height = '80px';
+      img.style.objectFit = 'contain';
+      img.style.borderRadius = '8px';
+      img.style.border = '1px solid rgba(255,255,255,0.20)';
+      img.style.background = 'rgba(255,255,255,0.06)';
+      img.style.marginRight = '4px';
+      gestureLetters.appendChild(img);
 
-    if (myToken === gestureState.cancelToken) {
-      label.textContent = '';
-    }
+      loadImageWithFallback(img, imageUrls.slice()).then((loaded) => {
+        if (!loaded) {
+          console.warn('[SignStream] Failed to load gesture image for letter:', letterToken);
+        }
+      });
+    });
 
-    gestureState.playing = false;
+    return true;
   }
 
-  function stopGestures() {
-    gestureState.cancelToken++;
-    gestureState.playing = false;
-    gestureState.queue = [];
+  function processWordQueue() {
+    gestureState.displayTimeoutId = null;
+    if (!gestureState.isActive || gestureState.wordQueue.length === 0) return;
+
+    const word = gestureState.wordQueue.shift();
+    if (!renderQueuedWord(word)) {
+      processWordQueue();
+      return;
+    }
+
+    gestureState.displayTimeoutId = setTimeout(processWordQueue, wordDisplayDurationMs(word));
+  }
+
+  function enqueueWordsFromTranscript() {
+    if (!gestureState.isActive) return;
+
+    const newWords = transcriptToWords(lastTranscript);
+    const prefix = commonPrefixLength(gestureState.processedWords, newWords);
+    const toEnqueue = newWords
+      .slice(prefix)
+      .filter((w) => normalizeWord(w).length > 0);
+
+    gestureState.processedWords = newWords;
+    if (toEnqueue.length === 0) return;
+
+    gestureState.wordQueue.push(...toEnqueue);
+    if (!gestureState.displayTimeoutId) processWordQueue();
+  }
+
+  function startGestureRefresh() {
+    const root = ensureOverlay();
+    const wrap = root.querySelector('#signstream-gesture-wrap');
+    const gestureLetters = root.querySelector('#signstream-gesture-letters');
+    const label = root.querySelector('#signstream-gesture-label');
+    if (!wrap || !gestureLetters || !label) return;
+
+    wrap.style.display = 'flex';
+    gestureLetters.style.display = 'flex';
+
+    if (gestureState.isActive) return;
+
+    gestureState.isActive = true;
+    gestureState.processedWords = [];
+    gestureState.wordQueue = [];
+    enqueueWordsFromTranscript();
+  }
+
+  function stopGestureRefresh() {
+    if (gestureState.displayTimeoutId) {
+      clearTimeout(gestureState.displayTimeoutId);
+      gestureState.displayTimeoutId = null;
+    }
+    gestureState.wordQueue = [];
+    gestureState.processedWords = [];
+    gestureState.isActive = false;
 
     const root = document.getElementById('signstream-overlay-root');
     const wrap = root?.querySelector?.('#signstream-gesture-wrap');
     const video = root?.querySelector?.('#signstream-gesture-video');
     const label = root?.querySelector?.('#signstream-gesture-label');
+    const gestureLetters = root?.querySelector?.('#signstream-gesture-letters');
 
     try {
       if (video) {
@@ -443,6 +403,7 @@
       }
     } catch {}
 
+    if (gestureLetters) gestureLetters.innerHTML = '';
     if (label) label.textContent = '';
     if (wrap) wrap.style.display = 'none';
   }
@@ -455,7 +416,7 @@
     pending.tokens = [];
     pending.conf = 0;
     pending.displayAt = 0;
-    stopGestures();
+    stopGestureRefresh();
 
     const root = document.getElementById('signstream-overlay-root');
     if (!root) return;
@@ -524,15 +485,9 @@
     }
 
     if (wantsGestures) {
-      const queuedItems = queueGestureTokens(tokens);
-      if (queuedItems.length) {
-        gestureState.queue.push(...queuedItems);
-      }
-      if (!gestureState.playing) {
-        void playGestureSequence();
-      }
+      startGestureRefresh();
     } else {
-      stopGestures();
+      stopGestureRefresh();
     }
   }
 
@@ -609,18 +564,13 @@
     if (!isEnabled()) return;
 
     if (msg?.type === 'ENGINE_TOKENS') {
-      const tokens = msg.tokens || [];
-      const conf = Number(msg.conf || 0);
-      const displayAt = msg.display_at_epoch_ms || Date.now();
-      scheduleRender(tokens, conf, displayAt);
+      // Token-based rendering no longer used; gestures now driven by caption words
     }
 
     if (msg?.type === 'ENGINE_TRANSCRIPT') {
       lastTranscript = msg.text || '';
-      // If we're caption-focused, update immediately.
-      if (settings.mode !== 'sign-only') {
-        render(pending.tokens || [], pending.conf || 0);
-      }
+      render(pending.tokens || [], pending.conf || 0);
+      enqueueWordsFromTranscript();
     }
 
     if (msg?.type === 'ENGINE_STATUS') {
