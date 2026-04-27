@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SignStream (MVP)",
+  "name": "SignStream",
   "version": "0.0.2",
-  "description": "Real-time sign-language-style overlay (MVP).",
+  "description": "Real-time sign-language translation extension.",
   "permissions": ["tabCapture", "offscreen", "storage", "scripting", "activeTab"],
   "host_permissions": ["https://www.youtube.com/*"],
   "optional_host_permissions": ["*://*/*"],
@@ -11,7 +11,10 @@
   },
   "action": {
     "default_title": "SignStream",
-    "default_popup": "popup/popup.html"
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/sign-language.png"
+    }
   },
   "commands": {
     "toggle-capture": {
