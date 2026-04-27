@@ -25,6 +25,14 @@
 
   const gestureAvailabilityCache = new Map();
 
+  function expandFsToken(token) {
+    if (typeof token !== 'string' || !token.startsWith('FS:')) return [token];
+    const value = token.slice(3).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (!value) return [];
+    if (value.length <= 1) return [token];
+    return value.split('').map((ch) => `FS:${ch}`);
+  }
+
   function tokenToGestureAssetUrls(token) {
     if (!token || typeof token !== 'string') return [];
 
@@ -44,6 +52,61 @@
       `${base}.jpg`,
       `${base}.jpeg`,
     ];
+  }
+
+  function tokenToGestureImageUrls(token) {
+    if (!token || typeof token !== 'string') return [];
+
+    let normalized = token;
+    if (token.startsWith('FS:')) {
+      normalized = token.slice(3);
+    }
+
+    const safe = normalized.toLowerCase().replace(/[^a-z0-9_-]+/g, '');
+    if (!safe) return [];
+    const firstLetter = safe.charAt(0).toUpperCase();
+    const base = chrome.runtime.getURL(`assets/signs/test/${firstLetter}/${safe}`);
+    return [
+      `${base}.png`,
+      `${base}.webp`,
+      `${base}.jpg`,
+      `${base}.jpeg`,
+    ];
+  }
+
+  function loadImageWithFallback(img, urls) {
+    return new Promise((resolve) => {
+      const next = () => {
+        if (urls.length === 0) {
+          resolve(false);
+          return;
+        }
+
+        const url = urls.shift();
+        img.src = url;
+      };
+
+      img.onload = () => resolve(true);
+      img.onerror = () => next();
+      next();
+    });
+  }
+
+  function getNextGestureBlock() {
+    if (gestureState.queue.length === 0) return null;
+    const item = gestureState.queue.shift();
+    return Array.isArray(item) ? item : [item];
+  }
+
+  function queueGestureTokens(tokens) {
+    return (tokens || []).flatMap((t) => {
+      if (typeof t !== 'string') return [t];
+      if (!t.startsWith('FS:')) return [t];
+
+      const value = t.slice(3).toLowerCase().replace(/[^a-z0-9]+/g, '');
+      if (value.length <= 1) return [t];
+      return [value.split('').map((ch) => `FS:${ch}`)];
+    });
   }
 
   // Try to avoid repeated failed loads, but don't block playback if probing fails.
@@ -172,15 +235,13 @@
     gestureVideo.style.border = '1px solid rgba(255,255,255,0.20)';
     gestureVideo.style.background = 'rgba(255,255,255,0.06)';
 
-    const gestureImage = document.createElement('img');
-    gestureImage.id = 'signstream-gesture-image';
-    gestureImage.style.display = 'none';
-    gestureImage.style.width = '160px';
-    gestureImage.style.height = '160px';
-    gestureImage.style.objectFit = 'contain';
-    gestureImage.style.borderRadius = '16px';
-    gestureImage.style.border = '1px solid rgba(255,255,255,0.20)';
-    gestureImage.style.background = 'rgba(255,255,255,0.06)';
+    const gestureLetters = document.createElement('div');
+    gestureLetters.id = 'signstream-gesture-letters';
+    gestureLetters.style.display = 'none';
+    gestureLetters.style.gap = '8px';
+    gestureLetters.style.flexWrap = 'wrap';
+    gestureLetters.style.alignItems = 'center';
+    gestureLetters.style.justifyContent = 'center';
 
     const gestureLabel = document.createElement('div');
     gestureLabel.id = 'signstream-gesture-label';
@@ -189,7 +250,7 @@
     gestureLabel.style.fontWeight = '700';
 
     gestureWrap.appendChild(gestureVideo);
-    gestureWrap.appendChild(gestureImage);
+    gestureWrap.appendChild(gestureLetters);
     gestureWrap.appendChild(gestureLabel);
 
     const chips = document.createElement('div');
@@ -223,10 +284,10 @@
     const root = ensureOverlay();
     const wrap = root.querySelector('#signstream-gesture-wrap');
     const video = root.querySelector('#signstream-gesture-video');
-    const image = root.querySelector('#signstream-gesture-image');
+    const gestureLetters = root.querySelector('#signstream-gesture-letters');
     const label = root.querySelector('#signstream-gesture-label');
 
-    if (!wrap || !video || !image || !label) return;
+    if (!wrap || !video || !gestureLetters || !label) return;
 
     const myToken = ++gestureState.cancelToken;
     gestureState.playing = true;
@@ -235,86 +296,124 @@
     console.log('[SignStream] Playing gesture queue');
 
     while (gestureState.queue.length > 0 && myToken === gestureState.cancelToken) {
-      const t = gestureState.queue.shift();
-      const urls = tokenToGestureAssetUrls(t);
-      console.log('[SignStream] Token:', t, 'URLs:', urls);
-      if (!urls.length) continue;
+      const block = getNextGestureBlock();
+      if (!block || block.length === 0) continue;
 
-      label.textContent = String(t);
+      const isFsWord = block.length > 1 && block.every((item) => typeof item === 'string' && item.startsWith('FS:'));
+      const tokenLabel = isFsWord
+        ? block.map((item) => item.slice(3)).join('')
+        : String(block[0] && typeof block[0] === 'string' && block[0].startsWith('FS:') ? block[0].slice(3) : block[0]);
 
-      await new Promise((resolve) => {
-        let done = false;
-        const finish = () => {
-          if (done) return;
-          done = true;
-          video.onended = null;
-          video.onerror = null;
-          image.onload = null;
-          image.onerror = null;
-          resolve();
-        };
+      label.textContent = tokenLabel;
+      gestureLetters.innerHTML = '';
 
-        const nextUrl = () => {
-          if (urls.length === 0) {
-            finish();
-            return;
-          }
+      if (isFsWord) {
+        video.style.display = 'none';
+        gestureLetters.style.display = 'flex';
 
-          const assetUrl = urls.shift();
-          const isVideo = assetUrl.endsWith('.webm');
-          if (isVideo) {
-            if (gestureAvailabilityCache.get(assetUrl) === false) {
-              nextUrl();
+        const loadPromises = block.map((letterToken) => {
+          const imageUrls = tokenToGestureImageUrls(letterToken);
+          const img = document.createElement('img');
+          img.style.width = '80px';
+          img.style.height = '80px';
+          img.style.objectFit = 'contain';
+          img.style.borderRadius = '16px';
+          img.style.border = '1px solid rgba(255,255,255,0.20)';
+          img.style.background = 'rgba(255,255,255,0.06)';
+          gestureLetters.appendChild(img);
+          return loadImageWithFallback(img, imageUrls.slice()).then((loaded) => {
+            if (!loaded) {
+              console.warn('[SignStream] Image failed to load for token:', letterToken);
+            }
+          });
+        });
+
+        await Promise.race([
+          Promise.allSettled(loadPromises),
+          new Promise((resolve) => setTimeout(resolve, 900)),
+        ]);
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      } else {
+        const t = block[0];
+        const urls = tokenToGestureAssetUrls(t);
+        if (!urls.length) continue;
+
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            video.onended = null;
+            video.onerror = null;
+            gestureLetters.innerHTML = '';
+            resolve();
+          };
+
+          const nextUrl = () => {
+            if (urls.length === 0) {
+              finish();
               return;
             }
-            video.style.display = 'block';
-            image.style.display = 'none';
 
-            video.onended = () => {
-              noteGestureResult(assetUrl, true);
-              finish();
-            };
-            video.onerror = () => {
-              noteGestureResult(assetUrl, false);
-              nextUrl();
-            };
+            const assetUrl = urls.shift();
+            const isVideo = assetUrl.endsWith('.webm');
+            if (isVideo) {
+              if (gestureAvailabilityCache.get(assetUrl) === false) {
+                nextUrl();
+                return;
+              }
+              video.style.display = 'block';
+              gestureLetters.style.display = 'none';
 
-            const timeoutMs = 900;
-            const timeoutId = setTimeout(() => {
-              clearTimeout(timeoutId);
-              finish();
-            }, timeoutMs);
+              video.onended = () => {
+                noteGestureResult(assetUrl, true);
+                finish();
+              };
+              video.onerror = () => {
+                noteGestureResult(assetUrl, false);
+                nextUrl();
+              };
 
-            video.src = assetUrl;
-            video.currentTime = 0;
-            void video.play().catch((err) => {
-              console.warn('[SignStream] Video failed to play:', assetUrl, err);
-              clearTimeout(timeoutId);
-              nextUrl();
-            });
-          } else {
-            video.style.display = 'none';
-            image.style.display = 'block';
-
-            image.onload = () => {
-              console.log('[SignStream] Image loaded:', assetUrl);
               const timeoutMs = 900;
-              setTimeout(finish, timeoutMs);
-            };
-            image.onerror = () => {
-              console.warn('[SignStream] Image failed to load:', assetUrl);
-              nextUrl();
-            };
+              const timeoutId = setTimeout(() => {
+                clearTimeout(timeoutId);
+                finish();
+              }, timeoutMs);
 
-            image.src = assetUrl;
-            if (image.complete && image.naturalWidth !== 0) {
-              setTimeout(finish, 0);
+              video.src = assetUrl;
+              video.currentTime = 0;
+              void video.play().catch((err) => {
+                console.warn('[SignStream] Video failed to play:', assetUrl, err);
+                clearTimeout(timeoutId);
+                nextUrl();
+              });
+            } else {
+              video.style.display = 'none';
+              gestureLetters.style.display = 'flex';
+
+              const imageUrls = tokenToGestureImageUrls(t);
+              const img = document.createElement('img');
+              img.style.width = '80px';
+              img.style.height = '80px';
+              img.style.objectFit = 'contain';
+              img.style.borderRadius = '16px';
+              img.style.border = '1px solid rgba(255,255,255,0.20)';
+              img.style.background = 'rgba(255,255,255,0.06)';
+              gestureLetters.appendChild(img);
+
+              loadImageWithFallback(img, imageUrls.slice()).then((loaded) => {
+                if (!loaded) {
+                  console.warn('[SignStream] Image failed to load for token:', t);
+                }
+                const timeoutMs = 900;
+                setTimeout(finish, timeoutMs);
+              });
             }
-          }
-        };
+          };
 
-        nextUrl();
-      });
+          nextUrl();
+        });
+      }
 
       await new Promise((r) => setTimeout(r, 120));
     }
@@ -334,7 +433,6 @@
     const root = document.getElementById('signstream-overlay-root');
     const wrap = root?.querySelector?.('#signstream-gesture-wrap');
     const video = root?.querySelector?.('#signstream-gesture-video');
-    const image = root?.querySelector?.('#signstream-gesture-image');
     const label = root?.querySelector?.('#signstream-gesture-label');
 
     try {
@@ -342,12 +440,6 @@
         video.pause();
         video.removeAttribute('src');
         video.load?.();
-      }
-    } catch {}
-
-    try {
-      if (image) {
-        image.removeAttribute('src');
       }
     } catch {}
 
@@ -410,15 +502,9 @@
     }
 
     if (wantsGestures) {
-      const expandedTokens = (tokens || []).flatMap((t) => {
-        if (typeof t !== 'string') return [t];
-        if (!t.startsWith('FS:')) return [t];
-        const value = t.slice(3).toLowerCase().replace(/[^a-z0-9]+/g, '');
-        if (value.length <= 1) return [t];
-        return value.split('').map((ch) => `FS:${ch}`);
-      });
-      if (expandedTokens.length) {
-        gestureState.queue.push(...expandedTokens);
+      const queuedItems = queueGestureTokens(tokens);
+      if (queuedItems.length) {
+        gestureState.queue.push(...queuedItems);
       }
       if (!gestureState.playing) {
         void playGestureSequence();
