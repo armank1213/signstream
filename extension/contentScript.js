@@ -19,55 +19,233 @@
     cancelToken: 0,
   };
 
+  // Avatar renderer runs in the content script world (avoids YouTube CSP blocking injected scripts).
   let avatarState = {
-    injected: false,
-    initSent: false,
+    loading: null,
+    ready: false,
+    error: null,
+    THREE: null,
+    GLTFLoader: null,
+    scene: null,
+    camera: null,
+    renderer: null,
+    clock: null,
+    avatar: null,
+    bones: {},
+    gesture: { name: null, t0: 0 },
   };
 
-  function injectScriptOnce({ id, src, type }) {
-    if (document.getElementById(id)) return Promise.resolve();
+  function ensureAvatarMount() {
+    const root = ensureOverlay();
+    const wrap = root.querySelector('#signstream-avatar-wrap');
+    if (!wrap) return null;
 
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.id = id;
-      s.src = src;
-      if (type) s.type = type;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error(`Failed to load ${src}`));
-      (document.head || document.documentElement).appendChild(s);
-    });
+    let canvas = wrap.querySelector('#signstream-avatar-canvas');
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.id = 'signstream-avatar-canvas';
+      canvas.style.width = '220px';
+      canvas.style.height = '220px';
+      canvas.style.borderRadius = '16px';
+      canvas.style.border = '1px solid rgba(255,255,255,0.20)';
+      canvas.style.background = 'rgba(255,255,255,0.06)';
+      canvas.style.display = 'block';
+      wrap.appendChild(canvas);
+    }
+
+    let label = wrap.querySelector('#signstream-avatar-label');
+    if (!label) {
+      label = document.createElement('div');
+      label.id = 'signstream-avatar-label';
+      label.style.marginTop = '8px';
+      label.style.fontSize = '13px';
+      label.style.fontWeight = '700';
+      label.style.opacity = '0.9';
+      wrap.appendChild(label);
+    }
+
+    return { wrap, canvas, label };
   }
 
-  async function ensureAvatarInjected() {
-    if (avatarState.injected) return;
-    avatarState.injected = true;
+  function findFirstByName(root, patterns) {
+    if (!root) return null;
+    const pats = (patterns || []).map((p) => String(p).toLowerCase());
+    let best = null;
+    root.traverse((o) => {
+      if (!o || !o.name) return;
+      const n = String(o.name).toLowerCase();
+      if (pats.some((p) => n.includes(p))) best = o;
+    });
+    return best;
+  }
 
-    const url = chrome.runtime.getURL('renderer/avatarPage.mjs');
-    try {
-      await injectScriptOnce({ id: 'signstream-avatar-module', src: url, type: 'module' });
-    } catch (e) {
-      setStatus(`Avatar load failed: ${String(e?.message || e)}`);
-      avatarState.injected = false;
+  function avatarCacheBones(avatarRoot) {
+    const rightHand = findFirstByName(avatarRoot, [
+      'r_hand',
+      'righthand',
+      'j_bip_r_hand',
+      'hand_r',
+      'rhand',
+      'handright',
+      'hand',
+    ]);
+    const leftHand = findFirstByName(avatarRoot, [
+      'l_hand',
+      'lefthand',
+      'j_bip_l_hand',
+      'hand_l',
+      'lhand',
+      'handleft',
+      'hand',
+    ]);
+    const head = findFirstByName(avatarRoot, ['head']);
+
+    avatarState.bones = { rightHand, leftHand, head };
+  }
+
+  function avatarResetRotation(o, s = 0.15) {
+    if (!o || !o.rotation) return;
+    o.rotation.x *= 1 - s;
+    o.rotation.y *= 1 - s;
+    o.rotation.z *= 1 - s;
+  }
+
+  function avatarApplyGesture(name, t) {
+    const { rightHand, leftHand, head } = avatarState.bones || {};
+
+    avatarResetRotation(rightHand);
+    avatarResetRotation(leftHand);
+    avatarResetRotation(head, 0.08);
+
+    const wave = Math.sin(t * Math.PI * 2);
+
+    if (name === 'HELLO') {
+      if (rightHand) rightHand.rotation.z += wave * 0.6;
+    } else if (name === 'YES') {
+      if (head) head.rotation.x += Math.sin(t * Math.PI * 4) * 0.15;
+    } else if (name === 'NO') {
+      if (head) head.rotation.y += Math.sin(t * Math.PI * 4) * 0.25;
+    } else if (name === 'THANK') {
+      if (rightHand) rightHand.rotation.x += -0.6 * Math.sin(t * Math.PI);
+    } else if (name === 'PLEASE') {
+      if (rightHand) rightHand.rotation.y += 0.4 * Math.sin(t * Math.PI * 2);
+    } else if (name === 'HELP') {
+      if (leftHand) leftHand.rotation.y += -0.35 * Math.sin(t * Math.PI);
+      if (rightHand) rightHand.rotation.y += 0.35 * Math.sin(t * Math.PI);
+    } else {
+      if (rightHand) rightHand.rotation.x += 0.25 * Math.sin(t * Math.PI * 2);
     }
   }
 
-  function avatarPost(type, payload) {
-    try {
-      window.postMessage({ __signstream: true, type, ...(payload || {}) }, '*');
-    } catch {}
+  function avatarAnimate() {
+    if (!avatarState.renderer || !avatarState.scene || !avatarState.camera) return;
+
+    if (avatarState.avatar) {
+      avatarState.avatar.rotation.y = Math.sin(Date.now() / 2000) * 0.15;
+    }
+
+    if (avatarState.gesture?.name) {
+      const dur = 0.85;
+      const t = Math.min(1, (performance.now() - avatarState.gesture.t0) / (dur * 1000));
+      avatarApplyGesture(avatarState.gesture.name, t);
+      if (t >= 1) avatarState.gesture.name = null;
+    }
+
+    const canvas = avatarState.renderer.domElement;
+    const w = canvas.clientWidth || 220;
+    const h = canvas.clientHeight || 220;
+    avatarState.renderer.setSize(w, h, false);
+    avatarState.camera.aspect = w / h;
+    avatarState.camera.updateProjectionMatrix();
+
+    avatarState.renderer.render(avatarState.scene, avatarState.camera);
+    requestAnimationFrame(avatarAnimate);
   }
 
-  async function ensureAvatarInit() {
-    await ensureAvatarInjected();
-    if (avatarState.initSent) return;
+  async function ensureAvatarReady() {
+    if (avatarState.ready) return;
+    if (avatarState.loading) return avatarState.loading;
 
-    avatarState.initSent = true;
-    avatarPost('AVATAR_INIT', { modelUrl: chrome.runtime.getURL('assets/avatar/model.vrm') });
+    avatarState.loading = (async () => {
+      const mount = ensureAvatarMount();
+      if (!mount) throw new Error('Avatar mount missing');
+
+      const { canvas, label } = mount;
+      label.textContent = 'Loading avatar…';
+
+      // Load modules (must be web accessible for some Chrome versions)
+      const threeUrl = chrome.runtime.getURL('lib/three.module.min.js');
+      const loaderUrl = chrome.runtime.getURL('lib/GLTFLoader.mjs');
+
+      const THREE = await import(threeUrl);
+      const loaderMod = await import(loaderUrl);
+
+      const GLTFLoader = loaderMod.GLTFLoader;
+      if (!GLTFLoader) throw new Error('GLTFLoader unavailable');
+
+      avatarState.THREE = THREE;
+      avatarState.GLTFLoader = GLTFLoader;
+
+      avatarState.scene = new THREE.Scene();
+
+      avatarState.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+      avatarState.camera.position.set(0, 1.35, 2.2);
+
+      avatarState.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+      avatarState.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+      hemi.position.set(0, 2, 0);
+      avatarState.scene.add(hemi);
+
+      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+      dir.position.set(1, 2, 1);
+      avatarState.scene.add(dir);
+
+      const modelUrl = chrome.runtime.getURL('assets/avatar/model.vrm');
+
+      const loader = new GLTFLoader();
+      let gltf;
+      try {
+        gltf = await loader.loadAsync(modelUrl);
+      } catch (e) {
+        throw new Error(`Failed to load model.vrm: ${String(e?.message || e)}`);
+      }
+
+      avatarState.avatar = gltf.scene;
+      avatarState.avatar.position.set(0, 0, 0);
+      avatarState.scene.add(avatarState.avatar);
+      avatarCacheBones(avatarState.avatar);
+
+      label.textContent = 'Avatar ready';
+      avatarState.ready = true;
+      avatarState.error = null;
+
+      requestAnimationFrame(avatarAnimate);
+    })().catch((e) => {
+      avatarState.error = String(e?.message || e);
+      avatarState.ready = false;
+      const mount = ensureAvatarMount();
+      if (mount?.label) mount.label.textContent = 'Avatar load failed';
+      setStatus(`Avatar error: ${avatarState.error}`);
+    }).finally(() => {
+      avatarState.loading = null;
+    });
+
+    return avatarState.loading;
   }
 
-  function sendAvatarTokens(tokens) {
-    void ensureAvatarInit();
-    avatarPost('AVATAR_TOKENS', { tokens: tokens || [] });
+  function avatarPlayTokens(tokens) {
+    void ensureAvatarReady();
+
+    const mount = ensureAvatarMount();
+    const label = mount?.label;
+
+    const first = (tokens || []).find((x) => x && typeof x === 'string' && !x.startsWith('FS:'));
+    if (!first) return;
+
+    if (label) label.textContent = String(first);
+    avatarState.gesture = { name: String(first).toUpperCase(), t0: performance.now() };
   }
 
   const gestureAvailabilityCache = new Map();
@@ -365,7 +543,7 @@
     }
 
     if (wantsAvatar) {
-      sendAvatarTokens(tokens || []);
+      avatarPlayTokens(tokens || []);
     }
   }
 
@@ -425,15 +603,7 @@
     void loadSettings();
   });
 
-  window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
-    const msg = event.data;
-    if (!msg || msg.__signstream !== true) return;
-
-    if (msg.type === 'AVATAR_STATUS') {
-      setStatus(msg.status || '');
-    }
-  });
+  // Avatar now runs in content script world; no window message bridge needed.
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (!isYouTubeWatch()) return;

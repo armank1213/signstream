@@ -65,4 +65,6 @@ This repo does not ship a VRM model by default (licensing varies). Add your own 
 
 Current MVP behavior: the avatar performs simple procedural gestures for a few tokens (HELLO/YES/NO/THANK/etc). For real ASL signing you’ll eventually need a curated animation library per token.
 
+If the avatar fails to load, the overlay status line will show an `Avatar error: ...` message (usually missing `model.vrm` or an unsupported VRM/glTF feature).
+
 Note: I can’t generate or bundle copyrighted sign-language datasets for you. Use self-made or properly-licensed assets.
