@@ -342,6 +342,14 @@ async function stopCapture() {
   state.lastError = null;
   state.capturing = false;
 
+  if (state.tabId) {
+    try {
+      await tabsSendMessage(state.tabId, { type: 'SIGNSTREAM_STOP' });
+    } catch (e) {
+      console.warn('[SignStream] Failed to send stop to content script:', e?.message);
+    }
+  }
+
   try {
     await runtimeSendMessage({ type: 'OFFSCREEN_STOP' });
   } catch {

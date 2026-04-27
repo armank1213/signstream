@@ -447,6 +447,28 @@
     if (wrap) wrap.style.display = 'none';
   }
 
+  function stopRendering() {
+    if (pending.timeoutId) {
+      clearTimeout(pending.timeoutId);
+      pending.timeoutId = null;
+    }
+    pending.tokens = [];
+    pending.conf = 0;
+    pending.displayAt = 0;
+    stopGestures();
+
+    const root = document.getElementById('signstream-overlay-root');
+    if (!root) return;
+
+    const chips = root.querySelector('#signstream-chips');
+    const caption = root.querySelector('#signstream-caption');
+    const status = root.querySelector('#signstream-status');
+
+    if (chips) chips.textContent = '';
+    if (caption) caption.textContent = '';
+    if (status) status.textContent = 'Stopped';
+  }
+
   function render(tokens, conf) {
     const root = ensureOverlay();
     const chips = root.querySelector('#signstream-chips');
@@ -603,6 +625,13 @@
 
     if (msg?.type === 'ENGINE_STATUS') {
       setStatus(msg.status || '');
+      if (msg.status === 'Stopped' || msg.status === 'Idle' || msg.status === 'Error') {
+        stopRendering();
+      }
+    }
+
+    if (msg?.type === 'SIGNSTREAM_STOP' || msg?.type === 'OFFSCREEN_STOP') {
+      stopRendering();
     }
   });
 
