@@ -33,6 +33,8 @@
     {
       "resources": [
         "assets/signs/*",
+        "assets/signs/*/*",
+        "assets/signs/test/*/*",
         "contentScript.js"
       ],
       "matches": ["<all_urls>"]

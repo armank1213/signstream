@@ -35,7 +35,8 @@
 
     const safe = normalized.toLowerCase().replace(/[^a-z0-9_-]+/g, '');
     if (!safe) return [];
-    const base = chrome.runtime.getURL(`assets/signs/${safe}`);
+    const firstLetter = safe.charAt(0).toUpperCase();
+    const base = chrome.runtime.getURL(`assets/signs/test/${firstLetter}/${safe}`);
     return [
       `${base}.webm`,
       `${base}.png`,
@@ -218,24 +219,25 @@
     return root;
   }
 
-  async function playGestureSequence(tokens) {
+  async function playGestureSequence() {
     const root = ensureOverlay();
     const wrap = root.querySelector('#signstream-gesture-wrap');
     const video = root.querySelector('#signstream-gesture-video');
+    const image = root.querySelector('#signstream-gesture-image');
     const label = root.querySelector('#signstream-gesture-label');
 
-    if (!wrap || !video || !label) return;
+    if (!wrap || !video || !image || !label) return;
 
     const myToken = ++gestureState.cancelToken;
     gestureState.playing = true;
 
     wrap.style.display = 'flex';
+    console.log('[SignStream] Playing gesture queue');
 
-    const queue = (tokens || []).slice(0, 12);
-    for (const t of queue) {
-      if (myToken !== gestureState.cancelToken) break;
-
+    while (gestureState.queue.length > 0 && myToken === gestureState.cancelToken) {
+      const t = gestureState.queue.shift();
       const urls = tokenToGestureAssetUrls(t);
+      console.log('[SignStream] Token:', t, 'URLs:', urls);
       if (!urls.length) continue;
 
       label.textContent = String(t);
@@ -277,7 +279,6 @@
               nextUrl();
             };
 
-            // Safety timeout (prevents hanging if onended never fires)
             const timeoutMs = 900;
             const timeoutId = setTimeout(() => {
               clearTimeout(timeoutId);
@@ -286,7 +287,8 @@
 
             video.src = assetUrl;
             video.currentTime = 0;
-            void video.play().catch(() => {
+            void video.play().catch((err) => {
+              console.warn('[SignStream] Video failed to play:', assetUrl, err);
               clearTimeout(timeoutId);
               nextUrl();
             });
@@ -295,21 +297,25 @@
             image.style.display = 'block';
 
             image.onload = () => {
+              console.log('[SignStream] Image loaded:', assetUrl);
               const timeoutMs = 900;
               setTimeout(finish, timeoutMs);
             };
             image.onerror = () => {
+              console.warn('[SignStream] Image failed to load:', assetUrl);
               nextUrl();
             };
 
             image.src = assetUrl;
+            if (image.complete && image.naturalWidth !== 0) {
+              setTimeout(finish, 0);
+            }
           }
         };
 
         nextUrl();
       });
 
-      // Small gap between signs
       await new Promise((r) => setTimeout(r, 120));
     }
 
@@ -323,10 +329,12 @@
   function stopGestures() {
     gestureState.cancelToken++;
     gestureState.playing = false;
+    gestureState.queue = [];
 
     const root = document.getElementById('signstream-overlay-root');
     const wrap = root?.querySelector?.('#signstream-gesture-wrap');
     const video = root?.querySelector?.('#signstream-gesture-video');
+    const image = root?.querySelector?.('#signstream-gesture-image');
     const label = root?.querySelector?.('#signstream-gesture-label');
 
     try {
@@ -334,6 +342,12 @@
         video.pause();
         video.removeAttribute('src');
         video.load?.();
+      }
+    } catch {}
+
+    try {
+      if (image) {
+        image.removeAttribute('src');
       }
     } catch {}
 
@@ -348,6 +362,8 @@
     const caption = root.querySelector('#signstream-caption');
     const gestureWrap = root.querySelector('#signstream-gesture-wrap');
     const mode = settings.mode;
+
+    console.log('[SignStream] Render called with tokens:', tokens, 'mode:', mode, 'signRenderMode:', settings.signRenderMode);
 
     if (caption) {
       caption.style.display = mode === 'sign-only' ? 'none' : 'block';
@@ -394,8 +410,19 @@
     }
 
     if (wantsGestures) {
-      stopGestures();
-      void playGestureSequence(tokens || []);
+      const expandedTokens = (tokens || []).flatMap((t) => {
+        if (typeof t !== 'string') return [t];
+        if (!t.startsWith('FS:')) return [t];
+        const value = t.slice(3).toLowerCase().replace(/[^a-z0-9]+/g, '');
+        if (value.length <= 1) return [t];
+        return value.split('').map((ch) => `FS:${ch}`);
+      });
+      if (expandedTokens.length) {
+        gestureState.queue.push(...expandedTokens);
+      }
+      if (!gestureState.playing) {
+        void playGestureSequence();
+      }
     } else {
       stopGestures();
     }
@@ -413,7 +440,11 @@
     const delay = Math.max(0, when - Date.now());
     pending.timeoutId = setTimeout(() => {
       pending.timeoutId = null;
-      render(pending.tokens, pending.conf);
+      try {
+        render(pending.tokens, pending.conf);
+      } catch (e) {
+        console.warn('[SignStream] render failed:', e);
+      }
     }, delay);
   }
 

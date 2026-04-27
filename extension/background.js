@@ -390,6 +390,8 @@ if (chrome.permissions?.onRemoved) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  const expectsResponse = msg?.type?.startsWith('POPUP_') || msg?.type?.startsWith('OFFSCREEN_');
+
   (async () => {
     try {
       if (msg?.type === 'POPUP_GET_STATUS') {
@@ -476,9 +478,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     } catch (e) {
       state.lastError = String(e?.message || e);
-      sendResponse({ ok: false, error: state.lastError, state });
+      if (expectsResponse) sendResponse({ ok: false, error: state.lastError, state });
     }
   })();
 
-  return true;
+  return expectsResponse;
 });
