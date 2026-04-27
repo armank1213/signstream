@@ -1,9 +1,60 @@
 # SignStream (MVP)
 
-SignStream is a **Chrome extension + local websocket “engine”** that turns a tab’s audio into:
+SignStream is an accessibility-first product for **deaf and hard-of-hearing people** who watch online video and still face a gap between raw captions and natural sign communication.
 
-- **captions** (live transcript)
-- **sign rendering** (currently a lightweight “ASL-ish” MVP: rule-based gloss + glossary mapping + optional fingerspelling-style fallback)
+At a high level, SignStream turns a video's audio stream into:
+
+- **live captions** for immediate text comprehension
+- **sign-oriented visual output** so meaning is not delivered through text alone
+
+## Pitch: the bigger goal
+
+The long-term goal is to make everyday web video more inclusive by giving deaf users a real-time interpretation layer directly in the player experience, instead of forcing them to switch tools, download transcripts, or rely on delayed/limited accessibility support.
+
+SignStream is designed to sit where users already are (YouTube today, more domains over time), then add a responsive overlay that can evolve from "captions + tokenized sign cues" into richer, more natural sign expression.
+
+## Why this matters
+
+- Captions are necessary but often not enough for many deaf viewers.
+- Accessibility quality is inconsistent across platforms and creators.
+- A browser-native layer can close this gap without requiring video publishers to change their workflow.
+- A local-first pipeline can reduce dependency on paid cloud APIs and preserve user control.
+
+## Product vision (MVP to future)
+
+### What the MVP proves
+
+- Real-time capture from the active tab.
+- Real-time transcript generation using local STT.
+- Real-time sign-oriented rendering in-page.
+- User-controlled display modes (captions-only, sign-only, combined).
+
+### Where this can go
+
+- Better linguistic transformations toward stronger sign-language fidelity.
+- Larger, higher-quality gesture/sign asset coverage.
+- Lower-latency, higher-accuracy speech recognition options.
+- Support for more sites and playback contexts.
+
+## Technical approach
+
+The architecture intentionally separates concerns:
+
+- a **browser extension** for capture, controls, and in-page rendering
+- a **local websocket engine** for speech-to-text and text-to-sign-token mapping
+
+This split lets the project evolve quickly:
+
+- improve translation logic without rewriting extension UX
+- improve UX/overlay behavior without touching core language logic
+- iterate on UI quickly with `mock_engine.py` before STT tuning
+
+## Current scope and limitations
+
+- This is an **MVP/prototype**, not a production-grade ASL translator.
+- Current sign output is heuristic/token-based ("ASL-ish"), not full grammatical ASL interpretation.
+- Gesture quality depends on available assets; unknown words can fall back to fingerspelling/text chips.
+- Default integration is currently optimized for YouTube, with optional domain permissions for others.
 
 ## Repo layout
 
