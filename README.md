@@ -1,4 +1,4 @@
-# SignStream (MVP)
+# SignStream
 
 SignStream is an accessibility-first product for **deaf and hard-of-hearing people** who watch online video and still face a gap between raw captions and natural sign communication.
 
